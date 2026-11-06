@@ -84,6 +84,7 @@ func TestPersonOnly(t *testing.T) {
 		"GIT_PAGER='rm -rf v' git -p log", "PAGER='rm -rf v' git log", "EDITOR='rm -rf v' git commit",
 		"FOO=1 VISUAL='rm -rf v' git commit", "env GIT_SSH_COMMAND='rm -rf v' git fetch",
 		"sudo env GIT_EDITOR='rm -rf v' git commit", "env -u X GIT_PAGER='rm -rf v' git log",
+		"export GIT_SSH_COMMAND='rm -rf v'; git fetch", "declare -x GIT_EDITOR='rm -rf v' && git commit",
 		// a /tmp/ or /dev/ path that .. takes out of it is a kept file
 		"echo x > /tmp/../etc/hosts", "go test > /tmp/a/../../home/u/.bashrc 2>&1", "tee /tmp/../home/u/.profile",
 		"ls &> /dev/../etc/motd", "echo x > /tmp/\\.\\./etc/hosts", "echo x > /tmp/\\\n../etc/hosts",
@@ -165,6 +166,7 @@ func TestPersonOnly(t *testing.T) {
 		"git submodule foreach git pull", "git -c alias.st=status st", "script -q /dev/null",
 		"git -c user.name='A B' commit -m x", "git -c core.pager='less -R' log", "git -c core.sshCommand='ssh -i k' fetch",
 		"GIT_SSH_COMMAND='ssh -i k' git fetch", "GIT_EDITOR=vim git commit", "env GIT_PAGER='less -R' git log",
+		"export GIT_SSH_COMMAND='ssh -i k'; git fetch",
 		// a heredoc fed to sudo without its shell options is data, and a benign command in another shell still goes
 		"sudo -u me cat <<EOF\nrm x\nEOF", "sudo -g staff -E cat <<EOF\nrm x\nEOF", "csh -c 'ls -la'", "tcsh <<EOF\necho hi\nEOF",
 	}
