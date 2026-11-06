@@ -715,6 +715,14 @@ var wrappers = map[string]bool{
 	"do": true, "then": true, "else": true, "elif": true, "if": true, "while": true, "until": true, "!": true,
 }
 
+// commandVars are environment variables whose value git runs through the shell, like the git -c values
+// gitConfigPersonOnly reads (GIT_SSH_COMMAND is core.sshCommand, GIT_PAGER core.pager); set before the program or
+// after env (GIT_SSH_COMMAND='…' git fetch), the value is read as a command.
+var commandVars = map[string]bool{
+	"GIT_SSH_COMMAND": true, "GIT_EDITOR": true, "GIT_SEQUENCE_EDITOR": true, "GIT_EXTERNAL_DIFF": true,
+	"GIT_PAGER": true, "PAGER": true, "EDITOR": true, "VISUAL": true,
+}
+
 // segmentPersonOnly looks at one simple command. A word counts as a program when it comes first (after NAME=value
 // assignments) or after a wrapper; so `grep -rn truncate src/` and `cd /tmp/rm` go through, `sudo -b rm x` does not.
 // A deletion or overwrite whose targets are all scratch (scratch.go) goes through, and so does one the setting lets
@@ -727,6 +735,11 @@ func (g *guard) segmentPersonOnly(words []string, depth int) string {
 func (g *guard) segmentFrom(pre, words []string, depth int) string {
 	first, wrapped := len(pre) == 0, len(pre) > 0
 	for i, w := range words {
+		if name, val, ok := strings.Cut(w, "="); ok && (first || wrapped) && commandVars[name] && depth < 3 {
+			if why := g.personOnlyDepth(val, depth+1); why != "" {
+				return why
+			}
+		}
 		if first && strings.Contains(w, "=") && !strings.HasPrefix(w, "-") {
 			continue
 		}

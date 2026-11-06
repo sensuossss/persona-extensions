@@ -78,6 +78,12 @@ func TestPersonOnly(t *testing.T) {
 		`git -c core.editor="sh -c 'rm -rf v'" commit --amend`, "git -c credential.helper='!rm -rf v' fetch",
 		"git bisect run rm -rf v",
 		"git submodule foreach 'rm -rf v'", "git submodule foreach --recursive 'rm -rf v'",
+		// the environment variables git runs through the shell like those -c values, before git or after env
+		"GIT_SSH_COMMAND='rm -rf v' git fetch", "GIT_EDITOR='rm -rf v' git commit --amend",
+		"GIT_SEQUENCE_EDITOR='rm -rf v' git rebase -i HEAD~2", "GIT_EXTERNAL_DIFF='rm -rf v' git diff",
+		"GIT_PAGER='rm -rf v' git -p log", "PAGER='rm -rf v' git log", "EDITOR='rm -rf v' git commit",
+		"FOO=1 VISUAL='rm -rf v' git commit", "env GIT_SSH_COMMAND='rm -rf v' git fetch",
+		"sudo env GIT_EDITOR='rm -rf v' git commit", "env -u X GIT_PAGER='rm -rf v' git log",
 		// a /tmp/ or /dev/ path that .. takes out of it is a kept file
 		"echo x > /tmp/../etc/hosts", "go test > /tmp/a/../../home/u/.bashrc 2>&1", "tee /tmp/../home/u/.profile",
 		"ls &> /dev/../etc/motd", "echo x > /tmp/\\.\\./etc/hosts", "echo x > /tmp/\\\n../etc/hosts",
@@ -158,6 +164,7 @@ func TestPersonOnly(t *testing.T) {
 		"git rebase -i HEAD~3", "git rebase --exec 'go test ./...' HEAD~2", "git bisect run go test ./...",
 		"git submodule foreach git pull", "git -c alias.st=status st", "script -q /dev/null",
 		"git -c user.name='A B' commit -m x", "git -c core.pager='less -R' log", "git -c core.sshCommand='ssh -i k' fetch",
+		"GIT_SSH_COMMAND='ssh -i k' git fetch", "GIT_EDITOR=vim git commit", "env GIT_PAGER='less -R' git log",
 		// a heredoc fed to sudo without its shell options is data, and a benign command in another shell still goes
 		"sudo -u me cat <<EOF\nrm x\nEOF", "sudo -g staff -E cat <<EOF\nrm x\nEOF", "csh -c 'ls -la'", "tcsh <<EOF\necho hi\nEOF",
 	}
