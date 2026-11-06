@@ -2,7 +2,7 @@
   "manifest_version": 1,
   "id": "claude-bypass-allow",
   "name": "Bypass 自动允许",
-  "version": "0.2.12",
+  "version": "0.2.13",
   "description": "Claude Code 开着 bypassPermissions（--dangerously-skip-permissions）时，有些调用仍会弹确认框（如读工作目录外的文件、开子 Agent、某些 Bash），无人值守的 Agent 就卡在「在等你」。在你选的电脑上给 Claude Code 装一个 PermissionRequest hook：只在会话是 bypass 模式时，自动允许 Bash、只读工具（Read、Glob、Grep、LS、NotebookRead）和子 Agent。删除、覆盖数据的 Bash 命令，目标都在临时目录或工作目录里（/tmp、会话的工作目录、~/ag-work、~/wt、Claude Code 的 worktree 等）时直接放行，其余的仍然问你；打开「删除和覆盖也自动允许」就都放行。force push、改权限的 Bash 命令，写文件、Workflow 和 MCP 工具，以及你自己配的 ask / deny 规则，始终问你。每次自动允许都记一条（命令截断、去掉密钥）。别的模式照常问你。",
   "publisher": "nwverse",
   "homepage": "https://github.com/nwverse/persona-extensions/tree/main/extensions/claude-bypass-allow",

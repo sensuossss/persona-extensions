@@ -664,13 +664,14 @@ func isDigits(s string) bool {
 // wrappers run the next program word as a command (sudo rm, xargs rm, find -exec rm, ssh host rm, eval rm,
 // busybox rm, autossh host rm, unshare rm, taskset 1 rm, for …; do rm …), so after one every word counts as a
 // possible program; shell keywords are here too. ssh runs its unquoted arguments ("ssh host rm -rf x") joined
-// with a space through the remote shell, the way it runs one quoted argument; autossh execs ssh; busybox runs its
-// applet as a program.
+// with a space through the remote shell, the way it runs one quoted argument; autossh execs ssh; busybox and
+// toybox run applets; torsocks, proxychains, firejail and bwrap wrap commands.
 var wrappers = map[string]bool{
 	"sudo": true, "doas": true, "xargs": true, "parallel": true, "env": true, "nice": true, "ionice": true, "nohup": true,
 	"time": true, "timeout": true, "exec": true, "command": true, "builtin": true, "stdbuf": true, "setsid": true,
 	"flock": true, "chroot": true, "runuser": true, "strace": true, "unbuffer": true, "watch": true, "ssh": true,
 	"autossh": true, "busybox": true, "eval": true,
+	"toybox": true, "torsocks": true, "proxychains": true, "proxychains4": true, "firejail": true, "bwrap": true,
 	"npx": true, "pnpx": true, "bunx": true, "dlx": true, "uvx": true, "pipx": true,
 	"unshare": true, "taskset": true, "coproc": true, "script": true, "sg": true, "trap": true,
 	"-exec": true, "-execdir": true, "-ok": true, "-okdir": true,
