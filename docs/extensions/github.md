@@ -25,7 +25,7 @@ Switching the extension on turns on what the hub already did before (the connect
   - The `inbox` settings name the repositories (only these, or all but these; `owner/*` stands for an owner's every repository) and the kinds that never come in.
 
   A notification they leave out is passed over before anything about it is read: it makes no inbox item, so nothing is pushed for it. A change applies to what comes after it (the hub restarts the extension, which reads the notifications again). Items already in the inbox are neither removed nor changed, and the extension no longer updates them. The page and the assistant's tools still read every repository.
-- **Knowledge base.** PRs and issues you are involved in (`involves:@me`) are archived with their comments and reviews as conversations `github-<owner>-<repo>-<number>`. The first run looks back 30 days.
+- **Knowledge base.** PRs and issues you are involved in (`involves:@me`) are archived with their comments and reviews as conversations `github-<owner>-<repo>-<number>`. Each list is read page by page (up to 1,000 comments, reviews and inline comments per thread), so a busy thread is kept whole. The first run looks back 30 days.
 - **Assistant tools.** These read without asking: `github_search`, `github_read`, `github_diff`, `github_checks`. `github_comment` and `github_review` are writes. They go through the hub's gate and are confirmed on the phone by default. Replying from an inbox item is the user's own send.
 - **Thread page.** An inbox item opens as the PR's or issue's page in the app: comments, reviews, line comments with their diff, timeline events and failed checks with the end of their logs.
 - **Sign-in.** Choose one of the two under Settings → Connectors → GitHub:

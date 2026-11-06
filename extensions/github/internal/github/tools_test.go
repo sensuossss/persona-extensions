@@ -44,9 +44,33 @@ func fakeAPI(t *testing.T) (*Connector, *[]string) {
 			{"id":102,"name":"lint","status":"in_progress","app":{"slug":"github-actions"}}]}`,
 		"/repos/example-org/example-repo/actions/jobs/101/logs": strings.Repeat("setup line\n", 2000) + "--- FAIL: TestExample\nexit status 1\n",
 	}
+	// PR 14 is busy: 101 comments and 101 reviews, listed oldest first a page at a time. Only the last review
+	// (bob's approval, the newest entry) has a verdict; the 100 before it are empty inline-thread replies.
+	routes["/repos/example-org/example-repo/issues/14"] = `{"number":14,"title":"Busy example","state":"open","user":{"login":"alice"},
+		"body":"desc","created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-03T00:00:00Z","comments":101,"pull_request":{"merged_at":null}}`
+	routes["/repos/example-org/example-repo/pulls/14"] = `{"head":{"ref":"feat/busy","sha":"0123456789abcdef0123456789abcdef01234567"},"base":{"ref":"main"}}`
+	lists := map[string][]string{}
+	for i := 1; i <= 101; i++ {
+		at := fmt.Sprintf("2026-01-02T%02d:%02d:00Z", i/60, i%60)
+		lists["/repos/example-org/example-repo/issues/14/comments"] = append(lists["/repos/example-org/example-repo/issues/14/comments"],
+			fmt.Sprintf(`{"user":{"login":"bob"},"body":"comment %d","created_at":%q}`, i, at))
+		review := fmt.Sprintf(`{"user":{"login":"bob"},"state":"COMMENTED","body":"","submitted_at":"2026-01-01T%02d:%02d:00Z"}`, i/60, i%60)
+		if i == 101 {
+			review = `{"user":{"login":"bob"},"state":"APPROVED","body":"","submitted_at":"2026-01-02T23:00:00Z"}`
+		}
+		lists["/repos/example-org/example-repo/pulls/14/reviews"] = append(lists["/repos/example-org/example-repo/pulls/14/reviews"], review)
+	}
 	var seen []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seen = append(seen, r.URL.RequestURI())
+		if items, ok := lists[r.URL.Path]; ok {
+			per, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
+			page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+			per, page = max(per, 1), max(page, 1) // GitHub's defaults are 30 and 1; every caller here sets both
+			from, to := min((page-1)*per, len(items)), min(page*per, len(items))
+			_, _ = w.Write([]byte("[" + strings.Join(items[from:to], ",") + "]"))
+			return
+		}
 		// PR 13 has 1001 changed files: ten full pages of 100 plus file #1001 alone on page 11.
 		if r.URL.Path == "/repos/example-org/example-repo/pulls/13/files" {
 			page, _ := strconv.Atoi(r.URL.Query().Get("page"))
@@ -160,6 +184,18 @@ func TestReadAPullRequest(t *testing.T) {
 	mustContain(t, out, "(the newest 1)", "改好了")
 	if strings.Contains(out, "Preview ready") {
 		t.Errorf("more than one comment:\n%s", out)
+	}
+}
+
+// With 101 comments the last page holds one: the newest 15 reach back into the page before, and the reviews are
+// read past the first 100 so the latest verdict shows.
+func TestReadTheNewestAcrossAPageBoundary(t *testing.T) {
+	c, _ := fakeAPI(t)
+	out := call(t, c, "github_read", `{"repo":"example-org/example-repo","number":14}`)
+	mustContain(t, out, "--- 102 comments and reviews, newest first (the newest 15)", "bob approved",
+		"bob:\ncomment 101", "bob:\ncomment 100\n", "bob:\ncomment 88")
+	if strings.Contains(out, "comment 87") {
+		t.Errorf("more than the newest 15:\n%s", out)
 	}
 }
 

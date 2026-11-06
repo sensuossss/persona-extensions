@@ -71,6 +71,23 @@ type Quote struct {
 	// Idle: no trade for a while, the market being closed (or at a break, or the instrument suspended); the page says
 	// so with At. A market that never closes leaves it false.
 	Idle bool
+	// Facts are the source's further figures, in the order to show them (今开, 昨收, 市盈率…); written already.
+	Facts []Fact
+}
+
+// Fact is one further figure of a quote.
+type Fact struct{ Label, Value string }
+
+// PriceLike writes f (a difference of prices) with as many decimals as like is written with.
+func (q Quote) PriceLike(f, like float64) string {
+	if q.Decimals > 0 {
+		return strconv.FormatFloat(f, 'f', q.Decimals, 64)
+	}
+	l := fmtPrice(like)
+	if _, frac, ok := strings.Cut(l, "."); ok {
+		return strconv.FormatFloat(f, 'f', len(frac), 64)
+	}
+	return strconv.FormatFloat(f, 'f', 0, 64)
 }
 
 // Price writes one of its prices with its decimals; "—" when unknown.
@@ -98,6 +115,7 @@ type Candle struct {
 
 // allBars are every period a source may offer, in order, with the page's titles. A Source's Bars are a subset.
 var allBars = []struct{ id, short, title string }{
+	{"T", "分时", "今日分时"}, // the last trading day's line, minute by minute (gathered into a few minutes a point)
 	{"15m", "15分", "15 分钟"},
 	{"1H", "1时", "1 小时"},
 	{"4H", "4时", "4 小时"},

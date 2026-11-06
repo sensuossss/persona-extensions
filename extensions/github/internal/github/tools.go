@@ -250,9 +250,14 @@ func (c *Connector) read(ctx context.Context, repo string, number, comments int)
 		if requested != "" {
 			fmt.Fprintf(&b, "Review requested from: %s\n", requested)
 		}
-		if comments > 0 {
-			if _, err := c.Get(ctx, fmt.Sprintf("/repos/%s/pulls/%d/reviews?per_page=100", repo, number), &reviews); err != nil {
+		// Reviews come oldest first, with no count to jump to the last page by: read on until a short page.
+		for page := 1; comments > 0 && page <= reviewPages; page++ {
+			var p []comment
+			if _, err := c.Get(ctx, fmt.Sprintf("/repos/%s/pulls/%d/reviews?per_page=100&page=%d", repo, number, page), &p); err != nil {
 				return "", err
+			}
+			if reviews = append(reviews, p...); len(p) < 100 {
+				break
 			}
 		}
 	}
@@ -261,11 +266,16 @@ func (c *Connector) read(ctx context.Context, repo string, number, comments int)
 		return b.String(), nil
 	}
 
-	// The newest comments: ask for the last page's worth.
+	// The newest comments: ask for the last page's worth, and the page before when the last is short of them.
 	var cs []comment
-	page := max(1, (it.Comments+99)/100)
-	if _, err := c.Get(ctx, fmt.Sprintf("%s/comments?per_page=100&page=%d", base, page), &cs); err != nil {
-		return "", err
+	for page := max(1, (it.Comments+99)/100); page >= 1 && len(cs) < comments; page-- {
+		var p []comment
+		if _, err := c.Get(ctx, fmt.Sprintf("%s/comments?per_page=100&page=%d", base, page), &p); err != nil {
+			return "", err
+		}
+		if cs = append(p, cs...); len(p) == 0 {
+			break
+		}
 	}
 	type entry struct {
 		at   time.Time

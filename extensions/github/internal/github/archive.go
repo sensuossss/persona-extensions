@@ -21,6 +21,7 @@ var (
 	archiveFirstDays = 30                  // how far back the first run looks
 	archiveForget    = 90 * 24 * time.Hour // threads quiet this long leave the cursor
 	archiveText      = 4000                // characters of one message kept
+	archivePages     = 10                  // pages of one list read per thread (100 each)
 )
 
 // archiveCursor is the connector's cursor: the updated_at reached, and per thread the newest message archived.
@@ -116,7 +117,7 @@ func (c *Connector) threadMessages(ctx context.Context, it issue, after time.Tim
 		ID int64 `json:"id"`
 		comment
 	}
-	if _, err := c.Get(ctx, fmt.Sprintf("/repos/%s/issues/%d/comments?per_page=100%s", repo, n, since), &cs); err != nil {
+	if err := getPages(ctx, c, fmt.Sprintf("/repos/%s/issues/%d/comments?per_page=100%s", repo, n, since), &cs); err != nil {
 		return nil, err
 	}
 	for _, cm := range cs {
@@ -127,7 +128,7 @@ func (c *Connector) threadMessages(ctx context.Context, it issue, after time.Tim
 			ID int64 `json:"id"`
 			comment
 		}
-		if _, err := c.Get(ctx, fmt.Sprintf("/repos/%s/pulls/%d/reviews?per_page=100", repo, n), &rs); err != nil {
+		if err := getPages(ctx, c, fmt.Sprintf("/repos/%s/pulls/%d/reviews?per_page=100", repo, n), &rs); err != nil {
 			return nil, err
 		}
 		for _, r := range rs {
@@ -149,7 +150,7 @@ func (c *Connector) threadMessages(ctx context.Context, it issue, after time.Tim
 			Line      *int      `json:"line"`
 			CreatedAt time.Time `json:"created_at"`
 		}
-		if _, err := c.Get(ctx, fmt.Sprintf("/repos/%s/pulls/%d/comments?per_page=100%s", repo, n, since), &ics); err != nil {
+		if err := getPages(ctx, c, fmt.Sprintf("/repos/%s/pulls/%d/comments?per_page=100%s", repo, n, since), &ics); err != nil {
 			return nil, err
 		}
 		for _, ic := range ics {
@@ -162,4 +163,19 @@ func (c *Connector) threadMessages(ctx context.Context, it issue, after time.Tim
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].At.Before(out[j].At) })
 	return out, nil
+}
+
+// getPages reads a list of 100 a page until a short page, so the cursor only moves past a thread read whole; reviews
+// have no since and come oldest first, and the newest messages are the ones past the first page.
+func getPages[T any](ctx context.Context, c *Connector, path string, out *[]T) error {
+	for page := 1; page <= archivePages; page++ {
+		var p []T
+		if _, err := c.Get(ctx, fmt.Sprintf("%s&page=%d", path, page), &p); err != nil {
+			return err
+		}
+		if *out = append(*out, p...); len(p) < 100 {
+			break
+		}
+	}
+	return nil
 }

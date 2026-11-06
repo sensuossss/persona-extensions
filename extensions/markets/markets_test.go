@@ -51,10 +51,11 @@ func newFakeOKX(t *testing.T) *fakeOKX {
 				`,` + tickerJSON("BTC-USDC", "SPOT", "50001", "48000") + `]`)
 		case "/api/v5/market/ticker":
 			prices := map[string][2]string{"BTC-USDT": {"50000", "48000"}, "ETH-USDT": {"2900", "3000"},
-				"DOGE-USDT": {"0.00001234", "0.00001234"}, "BTC-USDC": {"50001", "48000"}}
+				"DOGE-USDT": {"0.00001234", "0.00001234"}, "BTC-USDC": {"50001", "48000"}, "WBTC-USDT": {"49990", "48000"},
+				"BTC-USDT-SWAP": {"50010", "49000"}}
 			id := q.Get("instId")
 			if pr, found := prices[id]; found {
-				ok(`[` + tickerJSON(id, "SPOT", pr[0], pr[1]) + `]`)
+				ok(`[` + tickerJSON(id, instType(id), pr[0], pr[1]) + `]`)
 				return
 			}
 			fmt.Fprint(w, `{"code":"51001","msg":"Instrument ID doesn't exist.","data":[]}`)
@@ -173,17 +174,25 @@ func TestWatchlistPage(t *testing.T) {
 	}
 	v := render(t, p, "", 5)
 	got := texts(v)
-	for _, want := range []string{"自选 · 3", "row BTC-USDT 高 51000.00 · 低 47000.00 50000.00", "[+4.17% danger] →open:okx:BTC-USDT",
-		"[-3.33% positive] →open:okx:ETH-USDT", "24h 涨跌按 24 小时前的价格算。点一行看 K 线", "NOPE-USDT 现在查不到这个代码的行情", "→add", "→refresh"} {
+	for _, want := range []string{"自选 · 3", "row BTC-USDT +2000.00 · 成交 6172.50万 USDT 50000.00", "[+4.17% danger] →open:okx:BTC-USDT",
+		"row ETH-USDT -100.00 · ", "[-3.33% positive] →open:okx:ETH-USDT", "24h 涨跌按 24 小时前的价格算。点一行看 K 线",
+		"NOPE-USDT 现在查不到这个代码的行情", "segmented   order   →sort", "→refresh"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the page has no %q:\n%s", want, got)
 		}
+	}
+	// with a search box, codes are added through it: no add field; before it the field stays
+	if strings.Contains(got, "→add") || strings.Contains(got, "## 大盘") {
+		t.Errorf("v5: an add field, or 大盘 with OKX alone:\n%s", got)
+	}
+	if got := texts(render(t, p, "", 2)); !strings.Contains(got, "→add") {
+		t.Errorf("v2 has no add field:\n%s", got)
 	}
 	if v.RefreshAfter < 30 {
 		t.Errorf("refresh_after %d", v.RefreshAfter)
 	}
 
-	// one request for the whole spot list, and none while it is fresh
+	// a request per instrument (a few are read one by one), and none while they are fresh
 	hits := f.hits.Load()
 	render(t, p, "", 5)
 	if f.hits.Load() != hits {
@@ -353,7 +362,7 @@ func TestSearch(t *testing.T) {
 	if len(order) != 4 || order[3] != "WBTC-USDT" || !slices.Contains(order, "BTC-USDT-SWAP") || !slices.Contains(order, "BTC-USDC") {
 		t.Fatalf("search order %v:\n%s", order, got)
 	}
-	for _, want := range []string{"搜索「btc」", "现货 · 24h 成交额 61.73M USDT · 已在自选", "永续合约", "→open:okx:BTC-USDC", "→clear"} {
+	for _, want := range []string{"搜索「btc」", "现货 · 成交 6172.50万 USDT · 已在自选", "永续合约", "→open:okx:BTC-USDC", "→clear"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("results have no %q:\n%s", want, got)
 		}
@@ -610,7 +619,8 @@ func TestManifest(t *testing.T) {
 		t.Fatal(err)
 	}
 	if m.ID != "markets" || len(m.Contributes.Connectors) != 1 || m.Contributes.Connectors[0].ID != "markets" ||
-		len(m.Contributes.UI) != 1 || m.Contributes.UI[0].ID != "watchlist" || m.Contributes.UI[0].Placement != "nav_page" {
+		len(m.Contributes.UI) != 2 || m.Contributes.UI[0].ID != "watchlist" || m.Contributes.UI[0].Placement != "nav_page" ||
+		m.Contributes.UI[1].ID != "card" || m.Contributes.UI[1].Placement != "overview_card" {
 		t.Fatalf("manifest: %+v", m)
 	}
 	h := newPlugin(t.Logf).handlers()
@@ -650,5 +660,30 @@ func TestManifest(t *testing.T) {
 		if m.Runtime.Command[plat] != "bin/markets-"+plat {
 			t.Errorf("runtime for %s: %q", plat, m.Runtime.Command[plat])
 		}
+	}
+}
+
+// Every ui contribution in the manifest is served by the handlers; another is refused.
+func TestUIContributions(t *testing.T) {
+	var m struct {
+		Contributes struct {
+			UI []struct {
+				ID string `json:"id"`
+			} `json:"ui"`
+		} `json:"contributes"`
+	}
+	if err := json.Unmarshal(manifest, &m); err != nil {
+		t.Fatal(err)
+	}
+	h := newPlugin(t.Logf).handlers()
+	for _, ui := range m.Contributes.UI {
+		raw, _ := json.Marshal(map[string]any{"contribution": ui.ID, "ui_version": 5})
+		if _, err := h["ui.render"](context.Background(), nil, raw); err != nil && strings.Contains(err.Error(), "no contribution") {
+			t.Errorf("ui %s: %v", ui.ID, err)
+		}
+	}
+	raw, _ := json.Marshal(map[string]any{"contribution": "nope", "ui_version": 5})
+	if _, err := h["ui.render"](context.Background(), nil, raw); err == nil {
+		t.Error("an unknown contribution is drawn")
 	}
 }

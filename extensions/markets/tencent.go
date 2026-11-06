@@ -166,9 +166,9 @@ var marketInfo = [...]struct {
 	loc      *time.Location
 	bars     []string
 }{
-	mCN: {"cn", "A股", mustLoc("Asia/Shanghai"), []string{"15m", "1H", "1D", "1W"}},
-	mHK: {"hk", "港股", mustLoc("Asia/Hong_Kong"), []string{"1D", "1W"}},
-	mUS: {"us", "美股", mustLoc("America/New_York"), []string{"1D", "1W"}},
+	mCN: {"cn", "A股", mustLoc("Asia/Shanghai"), []string{"T", "15m", "1H", "1D", "1W"}},
+	mHK: {"hk", "港股", mustLoc("Asia/Hong_Kong"), []string{"T", "1D", "1W"}},
+	mUS: {"us", "美股", mustLoc("America/New_York"), []string{"T", "1D", "1W"}},
 }
 
 func mustLoc(name string) *time.Location {
@@ -369,7 +369,63 @@ func (s *txMarket) parseQuote(sym string, f []string) (Quote, bool) {
 		q.Idle = now().Sub(t) > idleAfter
 	}
 	q.Decimals = decimals(s.m, q.Kind, q.Last)
+	q.Facts = s.facts(q, num)
 	return q, true
+}
+
+// facts are a quote's further figures. Where Tencent keeps them (checked against live answers: the 52-week range
+// against a year of daily bars, turnover rates against volume over shares): 5 open, 4 previous close, 6 volume (A-share
+// lots), 43 the day's range as a percentage of the previous close, 39 P/E, 45 market value in 亿; A-shares 38 turnover
+// rate, 47 / 48 the limit-up and limit-down prices, 67 / 68 the 52-week high and low; Hong Kong 59 turnover rate,
+// 48 / 49 the 52-week range; US 38 turnover rate, 48 / 49 the 52-week range. Unknown (zero or negative) ones are left
+// out, and an index has no valuation, turnover rate or limits.
+func (s *txMarket) facts(q Quote, num func(int) float64) []Fact {
+	var out []Fact
+	add := func(label string, v float64, write func(float64) string) {
+		if v > 0 {
+			out = append(out, Fact{label, write(v)})
+		}
+	}
+	pct := func(v float64) string { return strconv.FormatFloat(v, 'f', 2, 64) + "%" }
+	plain := func(v float64) string { return strconv.FormatFloat(v, 'f', 2, 64) }
+	vol := num(6)
+	if s.m == mCN {
+		vol *= 100
+	}
+	index := q.Kind == "指数"
+	turn, hi52, lo52 := map[market]int{mCN: 38, mHK: 59, mUS: 38}[s.m], 48, 49
+	if s.m == mCN {
+		hi52, lo52 = 67, 68
+	}
+	add("今开", num(5), q.Price)
+	add("昨收", num(4), q.Price)
+	add("成交量", vol, fmtCN)
+	add("振幅", num(43), pct)
+	if !index {
+		add("换手率", num(turn), pct)
+		add("市盈率", num(39), plain)
+		add("总市值", num(45)*1e8, func(v float64) string { return fmtCN(v) + " " + q.Currency })
+		if s.m == mCN {
+			add("涨停", num(47), q.Price)
+			add("跌停", num(48), q.Price)
+		}
+	}
+	add("52 周最高", num(hi52), q.Price)
+	add("52 周最低", num(lo52), q.Price)
+	return out
+}
+
+// fmtCN writes a large number the Chinese way: 2.43万, 18.03亿, 1.80万亿.
+func fmtCN(v float64) string {
+	for _, u := range []struct {
+		n float64
+		s string
+	}{{1e12, "万亿"}, {1e8, "亿"}, {1e4, "万"}} {
+		if v >= u.n {
+			return strconv.FormatFloat(v/u.n, 'f', 2, 64) + u.s
+		}
+	}
+	return strconv.FormatFloat(v, 'f', 0, 64)
 }
 
 // decimals are the decimals a market writes a price with: two, three for A-share funds (their tick is 0.001) and
@@ -501,6 +557,9 @@ func (s *txMarket) Candles(ctx context.Context, sym, bar string, n int, fresh ti
 		}
 	}
 	code := s.code(sym, true)
+	if bar == "T" {
+		return s.minutes(ctx, code, fresh)
+	}
 	var u, key, layout string
 	var span time.Duration
 	switch bar {
@@ -599,6 +658,84 @@ func (s *txMarket) Candles(ctx context.Context, sym, bar string, n int, fresh ti
 
 // Site names the website URL opens.
 func (s *txMarket) Site() string { return "腾讯证券" }
+
+// minutePoints bounds the minute line: the minutes are gathered into as few minutes a point as keep it within this
+// (a chart takes 120 points a series).
+const minutePoints = 120
+
+// minutes reads the last trading day's minute line (web.ifzq.gtimg.cn/appstock/app/minute/query): lines "HHMM price
+// cumulative-volume [cumulative-turnover]" and the day ("20261106", empty before the day's first trade, when the
+// line is empty too). Each point is a candle of the minutes it gathers: its first price as the open, the last as the
+// close, the range, and the volume traded in them.
+func (s *txMarket) minutes(ctx context.Context, code string, fresh time.Duration) ([]Candle, error) {
+	body, err := s.t.get(ctx, s.t.base.kline+"/appstock/app/minute/query?"+url.Values{"code": {code}}.Encode(), fresh)
+	if err != nil {
+		return nil, err
+	}
+	var env struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+		Data map[string]struct {
+			Data struct {
+				Data []string `json:"data"`
+				Date string   `json:"date"`
+			} `json:"data"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &env); err != nil {
+		if bytes.Contains(body, []byte(`"data":[]`)) {
+			return nil, fmt.Errorf("%s里%w", s.Name(), ErrNotFound)
+		}
+		return nil, fmt.Errorf("腾讯行情的分时读不懂：%w", err)
+	}
+	if env.Code != 0 {
+		return nil, fmt.Errorf("腾讯行情回了错误 %d：%s", env.Code, clip(env.Msg, 200))
+	}
+	d, ok := env.Data[code]
+	if !ok {
+		return nil, fmt.Errorf("%s里%w", s.Name(), ErrNotFound)
+	}
+	day, err := time.ParseInLocation("20060102", d.Data.Date, marketInfo[s.m].loc)
+	if err != nil {
+		return nil, nil // no trade yet
+	}
+	type minute struct {
+		at         time.Time
+		price, cum float64
+	}
+	var ms []minute
+	for _, line := range d.Data.Data {
+		f := strings.Fields(line)
+		if len(f) < 3 || len(f[0]) != 4 {
+			continue
+		}
+		hh, err1 := strconv.Atoi(f[0][:2])
+		mm, err2 := strconv.Atoi(f[0][2:])
+		price, err3 := strconv.ParseFloat(f[1], 64)
+		cum, err4 := strconv.ParseFloat(f[2], 64)
+		if err1 != nil || err2 != nil || err3 != nil || err4 != nil || price == 0 {
+			continue
+		}
+		ms = append(ms, minute{day.Add(time.Duration(hh)*time.Hour + time.Duration(mm)*time.Minute), price, cum})
+	}
+	per := (len(ms) + minutePoints - 1) / minutePoints
+	var out []Candle
+	prev := 0.0 // the cumulative volume before the point
+	for i := 0; i < len(ms); i += per {
+		g := ms[i:min(i+per, len(ms))]
+		c := Candle{At: g[0].at, Open: g[0].price, Close: g[len(g)-1].price, High: g[0].price, Low: g[0].price,
+			Vol: max(g[len(g)-1].cum-prev, 0)}
+		for _, m := range g {
+			c.High, c.Low = max(c.High, m.price), min(c.Low, m.price)
+		}
+		prev = g[len(g)-1].cum
+		if s.m == mCN {
+			c.Vol *= 100
+		}
+		out = append(out, c)
+	}
+	return out, nil
+}
 
 // URL is the instrument's page on gu.qq.com.
 func (s *txMarket) URL(sym string) string {

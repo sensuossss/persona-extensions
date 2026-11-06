@@ -2,10 +2,17 @@
   "manifest_version": 1,
   "id": "markets",
   "name": "行情",
-  "version": "0.3.0",
-  "description": "行情（加密货币来自 OKX 公开行情接口，A 股、港股、美股来自腾讯行情的网页接口，都不用账号）：主导航上多一个「行情」，搜币、搜股票，看自选的价格和涨跌，点开看 K 线走势和成交量；助手能用工具搜代码、查报价和 K 线。hub 去读，手机不用代理。",
+  "version": "0.6.1",
+  "description": "行情（加密货币来自 OKX 公开行情接口，A 股、港股、美股来自腾讯行情的网页接口，都不用账号）：主导航上多一个「行情」，搜币、搜股票，看自选的价格和涨跌，点开看 K 线走势和成交量；可以给代码设价格提醒，到了进收件箱；助手能用工具搜代码、查报价和 K 线。hub 去读，手机不用代理。",
   "publisher": "nwverse",
-  "tags": ["行情", "加密货币", "OKX", "A股", "港股", "美股"],
+  "tags": [
+    "行情",
+    "加密货币",
+    "OKX",
+    "A股",
+    "港股",
+    "美股"
+  ],
   "engines": {
     "plugin_protocol": 1
   },
@@ -24,15 +31,23 @@
         "name": "行情",
         "capabilities": [
           "status",
-          "tools"
+          "tools",
+          "inbox",
+          "fallback"
         ],
-"hosts": [
+        "hosts": [
           "www.okx.com",
           "qt.gtimg.cn",
           "smartbox.gtimg.cn",
           "web.ifzq.gtimg.cn",
           "ifzq.gtimg.cn"
-        ]
+        ],
+        "kinds": [
+          "price_alert"
+        ],
+        "kind_descriptions": {
+          "price_alert": "用户自己在「行情」里设的价格提醒到了（涨到、跌到某个价，或涨跌幅超过设的百分比），需要用户"
+        }
       }
     ],
     "ui": [
@@ -41,12 +56,24 @@
         "title": "行情",
         "placement": "nav_page",
         "icon": "chart"
+      },
+      {
+        "id": "card",
+        "title": "行情",
+        "placement": "overview_card",
+        "opens": "watchlist"
       }
     ]
   },
   "configuration": {
     "type": "object",
     "properties": {
+      "triage_rules": {
+        "type": "string",
+        "title": "分拣规则",
+        "maxLength": 4000,
+        "description": "行情提醒的条目按什么分「需要你 / 知悉即可 / 噪音」，用你自己的话写；填了就只用它、不用收件箱的全局规则（只管行情提醒）。一般不在这里改：和助手说（比如「比特币的提醒知悉即可」），它来改。写 \\n 换行；空着用全局规则"
+      },
       "watchlist": {
         "type": "array",
         "title": "初始自选",
@@ -61,6 +88,10 @@
         "description": "来源没有这个周期时用它最接近 1 小时的",
         "default": "1H",
         "oneOf": [
+          {
+            "const": "T",
+            "title": "今日分时（股票）"
+          },
           {
             "const": "15m",
             "title": "15 分钟"
@@ -82,6 +113,12 @@
             "title": "1 周"
           }
         ]
+      },
+      "overview_card": {
+        "type": "boolean",
+        "title": "总览卡片",
+        "description": "在总览上放一张行情卡片：BTC、上证指数、恒生指数、纳斯达克，和自选里涨跌最多的几个，点开进「行情」。关掉就不显示",
+        "default": true
       },
       "colors": {
         "type": "string",
@@ -106,7 +143,7 @@
     }
   },
   "permissions": {
-"network": [
+    "network": [
       "www.okx.com",
       "qt.gtimg.cn",
       "smartbox.gtimg.cn",

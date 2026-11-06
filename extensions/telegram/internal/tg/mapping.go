@@ -179,8 +179,14 @@ func messageOf(mc tg.MessageClass, e entities) message {
 			}
 			out.From = e.nameOf(m.PeerID)
 		}
-		if h, ok := m.ReplyTo.(*tg.MessageReplyHeader); ok {
-			out.ReplyTo = h.ReplyToMsgID
+		// In a forum topic every message names the topic's creation message; only one with a top id answers a message.
+		// A reply to another chat's message can't be found in this one.
+		if h, ok := m.ReplyTo.(*tg.MessageReplyHeader); ok && (!h.ForumTopic || h.ReplyToTopID != 0) {
+			to, _ := e.peerOf(h.ReplyToPeerID)
+			here, _ := e.peerOf(m.PeerID)
+			if h.ReplyToPeerID == nil || to.key() == here.key() {
+				out.ReplyTo = h.ReplyToMsgID
+			}
 		}
 		var parts []string
 		if f := m.FwdFrom; f.FromName != "" || f.FromID != nil {
@@ -489,11 +495,18 @@ func (g *gotdClient) Messages(ctx context.Context, d dialog, ids []int) ([]messa
 	msgs, e := messagesOf(res)
 	out := make([]message, 0, len(msgs))
 	for _, m := range msgs {
-		if _, empty := m.(*tg.MessageEmpty); !empty {
+		if inDialog(m, d) { // not empty, and not another chat's
 			out = append(out, messageOf(m, e))
 		}
 	}
 	return out, nil
+}
+
+// inDialog says m is in d. DMs and basic groups share one message id space per account, and messages.getMessages
+// takes bare ids, so it answers an id from whichever chat holds it.
+func inDialog(m tg.MessageClass, d dialog) bool {
+	p, _ := entities{}.peerOf(peerOfMessage(m))
+	return p.ID != 0 && p.key() == d.Peer.key()
 }
 
 func (g *gotdClient) Info(ctx context.Context, d dialog) (chatInfo, error) {

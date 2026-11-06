@@ -85,6 +85,14 @@ func TestPersonOnly(t *testing.T) {
 		"FOO=1 VISUAL='rm -rf v' git commit", "env GIT_SSH_COMMAND='rm -rf v' git fetch",
 		"sudo env GIT_EDITOR='rm -rf v' git commit", "env -u X GIT_PAGER='rm -rf v' git log",
 		"export GIT_SSH_COMMAND='rm -rf v'; git fetch", "declare -x GIT_EDITOR='rm -rf v' && git commit",
+		"GIT_SSH_COMMAND='rm -rf v' Git fetch", "ENV GIT_EDITOR='rm -rf v' git commit",
+		// git global options that take the next word as their value, and -c aliases without ! (git arguments)
+		"git --namespace x clean -fdx", "git --namespace x reset --hard", "git --namespace x push --force origin main",
+		"git --config-env core.x=Y clean -fdx", "git --attr-source HEAD clean -fdx", "git --super-prefix x/ rm -r d",
+		"git -c alias.x=clean x -fdx", "git -c alias.x='reset --hard' x", "git -c alias.p='push --force' p origin main",
+		"git -c alias.c='checkout -f' c main", "git -c Alias.X=clean x -fd", "git -c alias.a=b -c alias.b=clean a",
+		"git -c alias.x=x x", "git --config-env alias.x=Y x", "git --config-env=alias.x=Y x", "git -calias.x=clean x",
+		"git -c alias.reset=status reset --hard",
 		// a /tmp/ or /dev/ path that .. takes out of it is a kept file
 		"echo x > /tmp/../etc/hosts", "go test > /tmp/a/../../home/u/.bashrc 2>&1", "tee /tmp/../home/u/.profile",
 		"ls &> /dev/../etc/motd", "echo x > /tmp/\\.\\./etc/hosts", "echo x > /tmp/\\\n../etc/hosts",
@@ -116,6 +124,12 @@ func TestPersonOnly(t *testing.T) {
 		"{,rm} -rf v", "{,} rm -rf v", "{,rm,-rf,v}", "{,rm}{,} -rf v", "{,/usr/bin/rm} -rf v", "{{rm,-rf},x}",
 		"{" + strings.Repeat(",", 5000) + "rm} -rf v", "echo " + strings.Repeat("{a,b}", 20) + "; rm -rf v",
 		"echo $(true)#y; rm -rf v", "echo `true`#y; rm -rf v", "echo $(x)#c && rm -rf v", "x$(echo hi)#z; rm -rf v",
+		// macOS file systems ignore case by default: RM finds /bin/RM and runs rm
+		`RM -rf "$t"`, "cd view && /bin/Rm -f sub/*", "sudo RM -rf /var/x", "SUDO rm -rf /var/x", "Git reset --hard",
+		"CHMOD 777 ~/.ssh", "/bin/R? -rf v", "BASH -c 'rm -rf v'", `PSQL -c "DROP TABLE users"`, "MKFS.ext4 /dev/sdb1",
+		"ſudo rm -rf /var/x", "ſhred ~/f", "/bin/ſh -c 'rm -rf v'", "\u212Aubectl delete ns x",
+		"CSH -c 'rm -rf v'", "/bin/Tcsh -c 'rm -rf v'", "PWSH -c 'rm -rf v'", "SUDO -s <<EOF\nrm -rf v\nEOF",
+		"Doas -s <<EOF\nrm -rf v\nEOF", "Git -C d clean -fd", "GIT --namespace n reset --hard", "Git -c alias.x=clean x -fdx",
 	}
 	for _, c := range stays {
 		if personOnly(c) == "" {
@@ -164,6 +178,8 @@ func TestPersonOnly(t *testing.T) {
 		"env FOO=1 go test ./...", "flock /tmp/l make", "trap - EXIT", "trap 'echo done' EXIT",
 		"git rebase -i HEAD~3", "git rebase --exec 'go test ./...' HEAD~2", "git bisect run go test ./...",
 		"git submodule foreach git pull", "git -c alias.st=status st", "script -q /dev/null",
+		"git --namespace x status", "git --config-env core.x=Y log", "git -c alias.co=checkout co main",
+		"git -c alias.l='log --oneline' l -5", "git -c alias.x=clean status",
 		"git -c user.name='A B' commit -m x", "git -c core.pager='less -R' log", "git -c core.sshCommand='ssh -i k' fetch",
 		"GIT_SSH_COMMAND='ssh -i k' git fetch", "GIT_EDITOR=vim git commit", "env GIT_PAGER='less -R' git log",
 		"export GIT_SSH_COMMAND='ssh -i k'; git fetch",

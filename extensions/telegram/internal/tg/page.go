@@ -249,7 +249,7 @@ func (g *gotdClient) Locate(ctx context.Context, d dialog, id int, thumb bool) (
 	}
 	msgs, _ := messagesOf(res)
 	for _, mc := range msgs {
-		if m, ok := mc.(*tg.Message); ok && m.ID == id {
+		if m, ok := mc.(*tg.Message); ok && m.ID == id && inDialog(m, d) {
 			if md := pageMediaOf(m.Media); md != nil {
 				if thumb && md.Thumb != nil {
 					return md.Thumb, nil

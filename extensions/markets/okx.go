@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -35,6 +36,8 @@ type okx struct {
 
 	mu    sync.Mutex
 	cache map[string]cached
+	// missing: when an instrument was last found not to exist, so a watchlist keeping one does not ask every time
+	missing map[string]time.Time
 }
 
 type cached struct {
@@ -43,7 +46,7 @@ type cached struct {
 }
 
 func newOKX(base string) *okx {
-	return &okx{base: base, http: &http.Client{Timeout: 15 * time.Second}, cache: map[string]cached{}}
+	return &okx{base: base, http: &http.Client{Timeout: 15 * time.Second}, cache: map[string]cached{}, missing: map[string]time.Time{}}
 }
 
 // get reads path and returns the answer's data (OKX wraps it in {code, msg, data}), from the cache when younger
@@ -164,9 +167,15 @@ func (o *okx) list(ctx context.Context, typ string, fresh time.Duration) ([]okxT
 	return list, nil
 }
 
-// tickers reads the tickers of ids, one list per instrument type (one request for the whole spot market rather
-// than one per instrument), keyed by id; ids OKX does not list are missing.
+// fewQuotes: up to this many instruments are read one by one (in parallel; a ticker is about 360 bytes), more
+// through the whole list of their type (one request, but the spot list is some 380 KB, 100 KB compressed).
+const fewQuotes = 5
+
+// Quotes reads the tickers of ids, keyed by id; ids OKX does not list are missing.
 func (o *okx) Quotes(ctx context.Context, ids []string, fresh time.Duration) (map[string]Quote, error) {
+	if len(ids) <= fewQuotes {
+		return o.each(ctx, ids, fresh)
+	}
 	types, want := map[string]bool{}, map[string]bool{}
 	for _, id := range ids {
 		types[instType(id)] = true
@@ -186,6 +195,38 @@ func (o *okx) Quotes(ctx context.Context, ids []string, fresh time.Duration) (ma
 				out[t.InstID] = t.quote()
 			}
 		}
+	}
+	return out, nil
+}
+
+// each reads ids one ticker each, in parallel; one OKX does not list is missing, another error fails them all.
+func (o *okx) each(ctx context.Context, ids []string, fresh time.Duration) (map[string]Quote, error) {
+	type answer struct {
+		id  string
+		q   Quote
+		err error
+	}
+	ch := make(chan answer, len(ids))
+	for _, id := range ids {
+		go func() {
+			q, err := o.Quote(ctx, id, fresh)
+			ch <- answer{id, q, err}
+		}()
+	}
+	out := map[string]Quote{}
+	var first error
+	for range ids {
+		a := <-ch
+		switch {
+		case a.err == nil:
+			out[a.id] = a.q
+		case errors.Is(a.err, ErrNotFound):
+		case first == nil:
+			first = a.err
+		}
+	}
+	if first != nil {
+		return nil, first
 	}
 	return out, nil
 }
@@ -258,7 +299,21 @@ func quoteCcy(id string) string {
 
 // Quote reads one instrument's ticker.
 func (o *okx) Quote(ctx context.Context, id string, fresh time.Duration) (Quote, error) {
+	o.mu.Lock()
+	at, gone := o.missing[id]
+	o.mu.Unlock()
+	if gone && fresh > 0 && time.Since(at) < fresh {
+		return Quote{}, fmt.Errorf("OKX 上%w", ErrNotFound)
+	}
 	data, err := o.get(ctx, "/api/v5/market/ticker?instId="+url.QueryEscape(id), fresh)
+	if errors.Is(err, ErrNotFound) {
+		o.mu.Lock()
+		if len(o.missing) >= cacheKeep {
+			clear(o.missing)
+		}
+		o.missing[id] = time.Now()
+		o.mu.Unlock()
+	}
 	if err != nil {
 		return Quote{}, err
 	}

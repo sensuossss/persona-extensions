@@ -1,0 +1,91 @@
+{
+  "manifest_version": 1,
+  "id": "homeassistant",
+  "name": "Home Assistant",
+  "version": "0.1.6",
+  "description": "接你自己的 Home Assistant：主导航上多一个「家」，按区域看设备和传感器的状态、搜索实体，点开开关灯、调亮度、调空调温度和模式、开关窗帘、执行场景，看最近 24 小时的变化；助手能查家里的状态和历史，也能操作设备（每次都在手机上确认，门锁和警戒永远要确认）。用长期访问令牌连 Home Assistant 的 REST API。",
+  "publisher": "nwverse",
+  "tags": ["智能家居", "Home Assistant", "设备"],
+  "engines": {
+    "plugin_protocol": 1
+  },
+  "runtime": {
+    "command": {
+      "linux-amd64": "bin/homeassistant-linux-amd64",
+      "linux-arm64": "bin/homeassistant-linux-arm64",
+      "darwin-arm64": "bin/homeassistant-darwin-arm64",
+      "darwin-amd64": "bin/homeassistant-darwin-amd64"
+    }
+  },
+  "contributes": {
+    "connectors": [
+      {
+        "id": "homeassistant",
+        "name": "Home Assistant",
+        "capabilities": [
+          "status",
+          "tools",
+          "actions"
+        ],
+        "confirm_always": [
+          "homeassistant_secure_call"
+        ]
+      }
+    ],
+    "ui": [
+      {
+        "id": "home",
+        "title": "家",
+        "placement": "nav_page",
+        "icon": "gauge"
+      }
+    ]
+  },
+  "configuration": {
+    "type": "object",
+    "required": [
+      "url"
+    ],
+    "properties": {
+      "url": {
+        "type": "string",
+        "title": "Home Assistant 地址",
+        "description": "hub 这台机器能访问到的地址，如 http://homeassistant.local:8123 或 http://<局域网地址>:8123",
+        "format": "uri"
+      },
+      "insecure_tls": {
+        "type": "boolean",
+        "title": "不校验证书",
+        "description": "地址是 https、用的是自签名证书时打开",
+        "default": false
+      },
+      "writable_domains": {
+        "type": "array",
+        "title": "可操作的类型",
+        "description": "能被操作的实体类型（domain）。不填就是常见的设备：灯、开关、风扇、窗帘、空调、播放器、扫地机、场景、脚本、门锁、警戒等；homeassistant、shell_command 这类整机和命令的永远不在里面，除非你写上",
+        "items": {
+          "type": "string"
+        }
+      },
+      "hidden_areas": {
+        "type": "array",
+        "title": "不显示的区域",
+        "description": "区域的名字或 id：页面和助手都看不到这些区域里的东西",
+        "items": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "secrets": [
+    {
+      "name": "token",
+      "title": "长期访问令牌",
+      "description": "在 Home Assistant 的「个人资料 › 安全 › 长期访问令牌」里新建；用管理员账号建才能按区域显示",
+      "required": true
+    }
+  ],
+  "permissions": {
+    "network": []
+  }
+}

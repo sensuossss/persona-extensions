@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona-extensions/pluginkit"
+	"github.com/nwverse/persona/sdk/go/exttest"
 )
 
 // fakeTencent answers like Tencent's endpoints from the samples in testdata/tencent, recorded from the live ones:
@@ -57,6 +59,13 @@ func newFakeTencent(t *testing.T) *fakeTencent {
 			name := "search-none.txt"
 			if r.URL.Query().Get("q") == "tengxun" {
 				name = "search-tengxun.txt"
+			}
+			serveFile(t, w, name)
+		case r.URL.Path == "/appstock/app/minute/query":
+			name := "minute-" + r.URL.Query().Get("code") + ".json"
+			if _, err := os.Stat(filepath.Join("testdata/tencent", name)); err != nil {
+				_, _ = w.Write([]byte(`{"code":-1,"msg":"param error","data":[]}`))
+				return
 			}
 			serveFile(t, w, name)
 		case r.URL.Path == "/appstock/app/fqkline/get", r.URL.Path == "/appstock/app/kline/mkline":
@@ -253,7 +262,7 @@ func TestTencentCandles(t *testing.T) {
 	if _, err := hk.Candles(ctx, "00700", "1D", 3, time.Minute); !errors.Is(err, ErrNotFound) {
 		t.Errorf("a code Tencent answers param error for: %v", err)
 	}
-	if !slices.Equal(cn.Bars(), []string{"15m", "1H", "1D", "1W"}) || !slices.Equal(us.Bars(), []string{"1D", "1W"}) {
+	if !slices.Equal(cn.Bars(), []string{"T", "15m", "1H", "1D", "1W"}) || !slices.Equal(us.Bars(), []string{"T", "1D", "1W"}) {
 		t.Errorf("bars %v %v", cn.Bars(), us.Bars())
 	}
 }
@@ -314,13 +323,13 @@ func TestLayoutGroups(t *testing.T) {
 	for _, s := range v.Sections {
 		titles = append(titles, s.Title)
 	}
-	if !slices.Equal(titles[:4], []string{"加密货币 · 2", "A股 · 2", "港股 · 1", "美股 · 2"}) {
+	if !slices.Equal(titles[:6], []string{"大盘", "", "加密货币 · 2", "A股 · 2", "港股 · 1", "美股 · 2"}) {
 		t.Fatalf("groups %q", titles)
 	}
 	got := texts(v)
 	for _, want := range []string{
-		"row 贵州茅台 600519.SH · 高 1457.72 · 低 1436.00 1440.49   [-0.79% positive]",
-		"row 苹果 AAPL · 高 355.38 · 低 342.06 · 休市 · 截至 11/5 16:00 344.17",
+		"row 贵州茅台 600519.SH · -11.51 · 成交 35.57亿 CNY 1440.49   [-0.79% positive]",
+		"row 苹果 AAPL · -5.34 · 成交 262.40亿 USD · 休市 · 截至 11/5 16:00 344.17",
 		"## A股 · 2 | 涨跌按上个交易日的收盘价算，时间是交易所当地的",
 		"## 美股 · 2 | 涨跌按上个交易日的收盘价算，时间是交易所当地的。点一行看 K 线"} {
 		if !strings.Contains(got, want) {
@@ -330,7 +339,7 @@ func TestLayoutGroups(t *testing.T) {
 	if v.Search == nil || v.Search.Placeholder != "搜代码或名称：BTC、茅台、腾讯、AAPL" {
 		t.Errorf("search box %+v", v.Search)
 	}
-	if strings.Contains(got, "腾讯控股 00700 · 高 428.60 · 低 419.60 · 休市") {
+	if strings.Contains(got, "腾讯控股 00700 · -7.40 · 成交 67.96亿 HKD · 休市") || !strings.Contains(got, "腾讯控股 00700 · -7.40") {
 		t.Errorf("Hong Kong is trading:\n%s", got)
 	}
 
@@ -376,5 +385,291 @@ func TestDecimals(t *testing.T) {
 	}
 	if got := (Quote{}).Price(3.50210); got != "3.5021" {
 		t.Errorf("auto: %s", got)
+	}
+}
+
+func TestFactsAndMinutes(t *testing.T) {
+	_, cn, hk, us := txSources(t)
+	ctx := context.Background()
+	q, err := cn.Quote(ctx, "600519.SH", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	facts := map[string]string{}
+	var order []string
+	for _, f := range q.Facts {
+		facts[f.Label] = f.Value
+		order = append(order, f.Label)
+	}
+	for label, want := range map[string]string{"今开": "1450.00", "昨收": "1452.00", "涨停": "1597.20", "跌停": "1306.80",
+		"52 周最高": "1539.98", "52 周最低": "1151.01", "市盈率": "21.92", "换手率": "0.20%"} {
+		if facts[label] != want {
+			t.Errorf("600519 %s = %q, want %q (%v)", label, facts[label], want, q.Facts)
+		}
+	}
+	if !strings.HasSuffix(facts["总市值"], "万亿 CNY") || !strings.HasSuffix(facts["成交量"], "万") || order[0] != "今开" {
+		t.Errorf("600519 facts %v", q.Facts)
+	}
+	idx, _ := cn.Quote(ctx, "000001.SH", time.Minute)
+	for _, f := range idx.Facts {
+		if f.Label == "市盈率" || f.Label == "涨停" || f.Label == "总市值" {
+			t.Errorf("an index has no %s", f.Label)
+		}
+	}
+	h, _ := hk.Quote(ctx, "00700", time.Minute)
+	if len(h.Facts) == 0 || h.Facts[len(h.Facts)-1].Label != "52 周最低" {
+		t.Errorf("00700 facts %v", h.Facts)
+	}
+
+	// the minute line: A-shares 121 minutes gathered two a point, from 9:30; volumes in shares
+	m, err := cn.Candles(ctx, "600519.SH", "T", 0, time.Minute)
+	if err != nil || len(m) != 61 {
+		t.Fatalf("minutes %d %v", len(m), err)
+	}
+	if !m[0].At.Equal(time.Date(2026, 11, 6, 9, 30, 0, 0, marketInfo[mCN].loc)) || m[0].Open != 1450 || m[0].Close != 1450.98 || m[0].Vol != 446500 {
+		t.Errorf("first point %+v", m[0])
+	}
+	if m[1].Vol <= 0 || !m[1].At.Equal(m[0].At.Add(2*time.Minute)) {
+		t.Errorf("second point %+v", m[1])
+	}
+	if hm, err := hk.Candles(ctx, "00700", "T", 0, time.Minute); err != nil || len(hm) == 0 || len(hm) > minutePoints {
+		t.Errorf("hk minutes %d %v", len(hm), err)
+	}
+	// before the US day's first trade the line is empty
+	if um, err := us.Candles(ctx, "AAPL", "T", 0, time.Minute); err != nil || len(um) != 0 {
+		t.Errorf("us minutes %v %v", um, err)
+	}
+}
+
+func TestBatchOnePage(t *testing.T) {
+	ft, fo := newFakeTencent(t), newFakeOKX(t)
+	p := newPlugin(t.Logf)
+	p.srcs = append(sources{newOKX(fo.srv.URL)}, tencentSources(ft.hosts())...)
+	defer func(old func() time.Time) { now = old }(now)
+	now = func() time.Time { return time.Date(2026, 11, 6, 11, 40, 0, 0, marketInfo[mCN].loc) }
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "watchlist.json"), []byte(`["cn:600519.SH","us:AAPL","cn:300750.SZ","cn:000001.SH"]`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var ip pluginkit.InitParams
+	ip.Plugin.DataDir = dir
+	if err := p.configure(ip); err != nil {
+		t.Fatal(err)
+	}
+
+	// the instrument page: the facts in grids of at most six, the minute line offered
+	r := act(t, p, "", "open:cn:000001.SH", nil)
+	got := texts(*r.View)
+	for _, want := range []string{"{今开=", "{52 周最高=", "→top:cn:000001.SH", "→up:cn:000001.SH"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the page has no %q:\n%s", want, got)
+		}
+	}
+	r = act(t, p, `{"i":"cn:600519.SH"}`, "bar", map[string]string{"bar": "T"})
+	if got := texts(*r.View); !strings.Contains(got, "K 线 · 今日分时") || !strings.Contains(got, "开盘以来") || !strings.Contains(got, "<收盘价 61>") {
+		t.Errorf("the minute line:\n%s", got)
+	}
+	// 置顶 moves it to the top of its group, over the others of its source only
+	act(t, p, `{"i":"cn:000001.SH"}`, "top:cn:000001.SH", nil)
+	if got := refStrings(p.watchlist()); !slices.Equal(got, []string{"cn:000001.SH", "us:AAPL", "cn:600519.SH", "cn:300750.SZ"}) {
+		t.Errorf("top %v", got)
+	}
+	// a US stock before its day: the minute line says so; a closed market's page refreshes slowly
+	r = act(t, p, `{"i":"us:AAPL","b":"T"}`, "refresh", nil)
+	if got := texts(*r.View); !strings.Contains(got, "还没有分时") || r.View.RefreshAfter != refreshIdle {
+		t.Errorf("us before the day (refresh %d):\n%s", r.View.RefreshAfter, got)
+	}
+
+	// added from a search's result: back to the search, the row marked
+	r = act(t, p, "", "search", map[string]string{"q": "tengxun"})
+	r = act(t, p, r.View.State, "open:hk:00700", nil)
+	r = act(t, p, r.View.State, "add:hk:00700", nil)
+	if r.Toast != "已加入 00700" || r.View.Title != "行情" || !strings.Contains(texts(*r.View), "已在自选") {
+		t.Errorf("after adding from a search: %q\n%s", r.Toast, texts(*r.View))
+	}
+
+	// the watchlist refreshes as usual while a market trades, slowly when none does
+	if v := render(t, p, "", 5); v.RefreshAfter != refreshEvery {
+		t.Errorf("A-shares trading: refresh %d", v.RefreshAfter)
+	}
+	now = func() time.Time { return time.Date(2026, 11, 6, 20, 0, 0, 0, marketInfo[mCN].loc) }
+	p.srcs = append(sources{newOKX(fo.srv.URL)}, tencentSources(ft.hosts())...) // a cache from before
+	if v := render(t, p, "", 5); v.RefreshAfter != refreshIdle {
+		t.Errorf("every market closed: refresh %d", v.RefreshAfter)
+	}
+}
+
+func TestCard(t *testing.T) {
+	ft, fo := newFakeTencent(t), newFakeOKX(t)
+	p := newPlugin(t.Logf)
+	p.srcs = append(sources{newOKX(fo.srv.URL)}, tencentSources(ft.hosts())...)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "watchlist.json"), []byte(`["cn:600519.SH","us:.DJI","BTC-USDT","hk:00700"]`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var ip pluginkit.InitParams
+	ip.Plugin.DataDir = dir
+	if err := p.configure(ip); err != nil {
+		t.Fatal(err)
+	}
+	draw := func() (pluginkit.View, error) {
+		raw, _ := json.Marshal(map[string]any{"contribution": "card", "placement": "overview_card", "size": "compact", "ui_version": 5})
+		out, err := p.handlers()["ui.render"](context.Background(), nil, raw) // as the hub calls it
+		if err != nil {
+			return pluginkit.View{}, err
+		}
+		return out.(pluginkit.View), nil
+	}
+	v, err := draw()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if raw, _ := json.Marshal(v); exttest.CheckView(raw, true) != nil { // a card: compact limits
+		t.Fatalf("the hub would refuse the card: %v", exttest.CheckView(raw, true))
+	}
+	got := texts(v)
+	// the benchmarks: BTC, then the sample's 上证指数 and 恒生指数 (纳斯达克 is not in it)
+	for _, want := range []string{"{BTC=50000.00 +4.17% danger}", "{上证指数=3649.15 -1.10% positive}", "{恒生指数=",
+		"## 自选里动得最多的", "row BTC-USDT"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the card has no %q:\n%s", want, got)
+		}
+	}
+	// the biggest move first: BTC +4.17%, then .DJI -3.44%
+	rows := v.Sections[1].Items
+	if len(rows) != 4 || rows[0].Title != "BTC-USDT" || rows[1].Title != "道琼斯" || rows[0].Action != nil {
+		t.Errorf("moves %+v", rows)
+	}
+
+	// off: unsupported, which the apps draw as nothing
+	ip.Config = []byte(`{"overview_card": false}`)
+	if err := p.configure(ip); err != nil {
+		t.Fatal(err)
+	}
+	_, err = draw()
+	var pe *pluginkit.Error
+	if !errors.As(err, &pe) || pe.Code != pluginkit.CodeUnsupported {
+		t.Errorf("off: %v", err)
+	}
+}
+
+func TestBatchTwoPage(t *testing.T) {
+	ft, fo := newFakeTencent(t), newFakeOKX(t)
+	p := newPlugin(t.Logf)
+	p.srcs = append(sources{newOKX(fo.srv.URL)}, tencentSources(ft.hosts())...)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "watchlist.json"),
+		[]byte(`["cn:600519.SH","BTC-USDT","cn:300750.SZ","ETH-USDT","cn:000001.SH","us:AAPL"]`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var ip pluginkit.InitParams
+	ip.Plugin.DataDir = dir
+	if err := p.configure(ip); err != nil {
+		t.Fatal(err)
+	}
+	rowTitles := func(v pluginkit.View, group string) []string {
+		var out []string
+		for _, s := range v.Sections {
+			if strings.HasPrefix(s.Title, group) {
+				for _, it := range s.Items {
+					out = append(out, it.Title)
+				}
+			}
+		}
+		return out
+	}
+
+	// 大盘 first, then the controls: the order, and the markets the watchlist has
+	v := render(t, p, "", 5)
+	checkView(t, v)
+	if v.Sections[0].Title != "大盘" || len(v.Sections[0].Items[0].Stats) != 3 {
+		t.Fatalf("大盘: %s", texts(v))
+	}
+	ctl := v.Sections[1].Items
+	if len(ctl) != 2 || ctl[0].Name != "sort" || ctl[1].Name != "mkt" || len(ctl[1].Choices) != 4 || ctl[1].Choices[3].Title != "美股" {
+		t.Fatalf("controls: %+v", ctl)
+	}
+
+	// the biggest fall first within each group: 宁德时代 -3.68%, 上证指数 -1.10%, 贵州茅台 -0.79%
+	r := act(t, p, v.State, "sort", map[string]string{"sort": "down"})
+	if got := rowTitles(*r.View, "A股"); !slices.Equal(got, []string{"宁德时代", "上证指数", "贵州茅台"}) {
+		t.Errorf("by fall: %v", got)
+	}
+	if got := rowTitles(*r.View, "加密货币"); !slices.Equal(got, []string{"ETH-USDT", "BTC-USDT"}) {
+		t.Errorf("crypto by fall: %v", got)
+	}
+	r = act(t, p, r.View.State, "sort", map[string]string{"sort": "up"})
+	if got := rowTitles(*r.View, "A股"); !slices.Equal(got, []string{"贵州茅台", "上证指数", "宁德时代"}) {
+		t.Errorf("by rise: %v", got)
+	}
+	// one market only; the order kept in the state; the stored order untouched
+	r = act(t, p, r.View.State, "mkt", map[string]string{"mkt": "cn"})
+	var groups []string
+	for _, s := range r.View.Sections {
+		if strings.Contains(s.Title, " · ") {
+			groups = append(groups, s.Title)
+		}
+	}
+	if !slices.Equal(groups, []string{"A股 · 3"}) || !strings.Contains(r.View.State, `"s":"up"`) {
+		t.Errorf("filtered: %v %s", groups, r.View.State)
+	}
+	if got := refStrings(p.watchlist()); got[0] != "cn:600519.SH" || got[2] != "cn:300750.SZ" {
+		t.Errorf("stored order changed: %v", got)
+	}
+	r = act(t, p, r.View.State, "mkt", map[string]string{"mkt": "all"})
+	if strings.Contains(r.View.State, `"m"`) {
+		t.Errorf("all markets: %s", r.View.State)
+	}
+
+	// a query that is itself a code comes first as its own row (the search box being the way to add one)
+	r = act(t, p, "", "search", map[string]string{"q": "cn:300750"})
+	got := texts(*r.View)
+	if r.View.Sections[0].Title != "代码 cn:300750.SZ" || !strings.Contains(got, "row 宁德时代 300750.SZ · 股票") {
+		t.Errorf("a code searched:\n%s", got)
+	}
+}
+
+func TestMatchRank(t *testing.T) {
+	_, cn, hk, _ := txSources(t)
+	okxSrc := newOKX("")
+	for _, c := range []struct {
+		q    string
+		src  Source
+		h    hit
+		want int
+	}{
+		{"700", hk, hit{Ref{"hk", "00700"}, Quote{Name: "腾讯控股"}}, 0},
+		{"腾讯控股", hk, hit{Ref{"hk", "00700"}, Quote{Name: "腾讯控股"}}, 0},
+		{"腾讯", hk, hit{Ref{"hk", "00700"}, Quote{Name: "腾讯控股"}}, 1},
+		{"腾讯", cn, hit{Ref{"cn", "000847.SH"}, Quote{Name: "腾讯济安"}}, 1},
+		{"tengxun", hk, hit{Ref{"hk", "00700"}, Quote{Name: "腾讯控股"}}, 2},
+		{"btc", okxSrc, hit{Ref{"okx", "BTC-USDT"}, Quote{}}, 0},
+		{"茅台", okxSrc, hit{Ref{"okx", "MT-USDT"}, Quote{}}, 3},
+	} {
+		if got := matchRank(c.q, c.src, c.h); got != c.want {
+			t.Errorf("matchRank(%q, %s) = %d, want %d", c.q, c.h.Ref, got, c.want)
+		}
+	}
+}
+
+func TestOKXFewOrMany(t *testing.T) {
+	f := newFakeOKX(t)
+	o := newOKX(f.srv.URL)
+	ctx := context.Background()
+	before := f.hits.Load()
+	qs, err := o.Quotes(ctx, []string{"BTC-USDT", "ETH-USDT", "NOPE-USDT"}, time.Minute)
+	if err != nil || len(qs) != 2 || f.hits.Load()-before != 3 {
+		t.Fatalf("few: %v %v, %d requests", qs, err, f.hits.Load()-before)
+	}
+	// the missing one is remembered while fresh
+	before = f.hits.Load()
+	if _, err := o.Quotes(ctx, []string{"NOPE-USDT"}, time.Minute); err != nil || f.hits.Load() != before {
+		t.Errorf("missing asked again: %v, %d requests", err, f.hits.Load()-before)
+	}
+	// more than a few: the whole list, one request
+	before = f.hits.Load()
+	ids := []string{"BTC-USDT", "ETH-USDT", "DOGE-USDT", "WBTC-USDT", "BTC-USDC", "NOPE-USDT"}
+	if qs, err := o.Quotes(ctx, ids, time.Minute); err != nil || len(qs) != 5 || f.hits.Load()-before != 1 {
+		t.Errorf("many: %d %v, %d requests", len(qs), err, f.hits.Load()-before)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"path"
 	"regexp"
 	"strings"
+	"unicode"
 )
 
 // The floor: Bash commands that stay with a person even in bypassPermissions mode, because they delete or overwrite
@@ -147,7 +148,7 @@ func (g *guard) personOnlyDepth(cmd string, depth int) string {
 	all, _ := scan(cmd)
 	for _, words := range all {
 		for _, w := range words {
-			if !sqlClients[path.Base(w)] {
+			if !sqlClients[progName(w)] {
 				continue
 			}
 			if sqlPermission.MatchString(cmd) {
@@ -187,7 +188,7 @@ func (g *guard) personOnlyDepth(cmd string, depth int) string {
 		}
 		shell := false
 		for i, w := range kept {
-			b := path.Base(w)
+			b := progName(w)
 			shell = shell || shells[b] || ((b == "sudo" || b == "doas") && sudoShell(kept[i+1:]))
 			for _, n := range globMatches(b) {
 				shell = shell || shells[n]
@@ -232,7 +233,7 @@ func (g *guard) personOnlyDepth(cmd string, depth int) string {
 // docker exec c sh -c '…').
 func (g *guard) nested(words []string, cmd string, depth int) string {
 	for _, w := range words {
-		if elsewhere[path.Base(w)] {
+		if elsewhere[progName(w)] {
 			roots := g.roots
 			g.roots = nil
 			defer func() { g.roots = roots }()
@@ -265,7 +266,7 @@ func stripHeredocs(cmd string) string {
 		segs, _ := scan(strings.Join(words, "\n"))
 		for _, ws := range segs {
 			for i, w := range ws {
-				b := path.Base(w)
+				b := progName(w)
 				keep = keep || shells[b] || ((b == "sudo" || b == "doas") && sudoShell(ws[i+1:]))
 				if b == "env" {
 					for _, a := range ws[i+1:] {
@@ -465,7 +466,7 @@ func withoutMessages(words []string) []string {
 	out := make([]string, 0, len(words))
 	for i := 0; i < len(words); i++ {
 		w := words[i]
-		if b := path.Base(w); b == "git" || b == "gh" {
+		if b := progName(w); b == "git" || b == "gh" {
 			prog = b
 		}
 		flag, val, inline := w, "", false
@@ -723,6 +724,20 @@ var commandVars = map[string]bool{
 	"GIT_PAGER": true, "PAGER": true, "EDITOR": true, "VISUAL": true,
 }
 
+// progName is the program a word runs, by the name the checks know it by. macOS file systems ignore case by default,
+// and fold it the Unicode way, so RM, /bin/Rm and ſhred (a long s) run rm and shred: each letter becomes the lower
+// case of the smallest letter it folds with (on a case-sensitive file system that only asks more). The shell's own
+// builtins and keywords (cd, if) are matched as written.
+func progName(w string) string {
+	return strings.Map(func(r rune) rune {
+		m := r
+		for f := unicode.SimpleFold(r); f != r; f = unicode.SimpleFold(f) {
+			m = min(m, f)
+		}
+		return unicode.ToLower(m)
+	}, path.Base(w))
+}
+
 // segmentPersonOnly looks at one simple command. A word counts as a program when it comes first (after NAME=value
 // assignments) or after a wrapper; so `grep -rn truncate src/` and `cd /tmp/rm` go through, `sudo -b rm x` does not.
 // A deletion or overwrite whose targets are all scratch (scratch.go) goes through, and so does one the setting lets
@@ -748,7 +763,7 @@ func (g *guard) segmentFrom(pre, words []string, depth int) string {
 		}
 		program := first || wrapped
 		first = false
-		name := path.Base(w)
+		name := progName(w)
 		before := append(append([]string{}, pre...), words[:i]...)
 		if program {
 			// a globbed program (/bin/r? -rf x) is whichever known program it matches
@@ -904,22 +919,33 @@ func ddDisk(args []string) bool {
 	return false
 }
 
+// gitValueOpts are git's global options that take the next word as their value.
+var gitValueOpts = map[string]bool{"-C": true, "-c": true, "--git-dir": true, "--work-tree": true, "--namespace": true,
+	"--config-env": true, "--attr-source": true, "--super-prefix": true}
+
 // gitPersonOnly looks at what follows git: its subcommand (after -C, -c and other global flags) and that one's
 // arguments.
 func (g *guard) gitPersonOnly(args []string, depth int) string {
 	i := 0
+	aliases := map[string]string{}
 	for i < len(args) && strings.HasPrefix(args[i], "-") {
-		if (args[i] == "-C" || args[i] == "-c" || args[i] == "--git-dir" || args[i] == "--work-tree") && i+1 < len(args) {
+		if gitValueOpts[args[i]] && i+1 < len(args) {
 			if args[i] == "-c" && depth < 3 {
 				if why := g.gitConfigPersonOnly(args[i+1], depth); why != "" {
 					return why
 				}
+			}
+			if args[i] == "-c" || args[i] == "--config-env" {
+				gitAlias(aliases, args[i+1], args[i] == "--config-env")
 			}
 			i++
 		} else if strings.HasPrefix(args[i], "-c") && depth < 3 {
 			if why := g.gitConfigPersonOnly(strings.TrimPrefix(args[i], "-c"), depth); why != "" {
 				return why
 			}
+			gitAlias(aliases, strings.TrimPrefix(args[i], "-c"), false)
+		} else if cfg, ok := strings.CutPrefix(args[i], "--config-env="); ok {
+			gitAlias(aliases, cfg, true)
 		}
 		i++
 	}
@@ -927,6 +953,18 @@ func (g *guard) gitPersonOnly(args []string, depth int) string {
 		return ""
 	}
 	sub, rest := args[i], args[i+1:]
+	// a -c alias without ! is git arguments in place of its name; git ignores an alias named after one of its own
+	// commands, so the subcommand as written is read too
+	if val, ok := aliases[strings.ToLower(sub)]; ok {
+		segs, _ := scan(val)
+		if val == "" || len(segs) != 1 || depth >= 3 {
+			return "git alias: " + sub
+		}
+		expanded := append(append(append([]string{}, args[:i]...), segs[0]...), rest...)
+		if why := g.gitPersonOnly(expanded, depth+1); why != "" {
+			return why
+		}
+	}
 	switch sub {
 	case "bisect":
 		for k, a := range rest {
@@ -1212,6 +1250,20 @@ func hasShort(words []string, c byte) bool {
 		}
 	}
 	return false
+}
+
+// gitAlias records a git -c or --config-env setting that defines an alias without !, by its lowercased name (git
+// matches alias names case-insensitively). A --config-env value is in the environment, so it is kept as "".
+func gitAlias(aliases map[string]string, cfg string, env bool) {
+	key, val, ok := strings.Cut(cfg, "=")
+	name, isAlias := strings.CutPrefix(strings.ToLower(key), "alias.")
+	if !ok || !isAlias || name == "" || (!env && strings.HasPrefix(val, "!")) {
+		return
+	}
+	if env {
+		val = ""
+	}
+	aliases[name] = val
 }
 
 // gitConfigPersonOnly looks at a git -c setting. Many values are commands git runs through the shell: a ! alias,

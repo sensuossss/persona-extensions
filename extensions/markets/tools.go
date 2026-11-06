@@ -116,8 +116,16 @@ func quoteLine(r Ref, q Quote) string {
 	if q.Idle && !q.At.IsZero() {
 		idle = "（休市，截至交易所当地时间 " + q.At.Format("2006-01-02 15:04") + "）"
 	}
-	return fmt.Sprintf("- %s%s：最新 %s %s%s，%s %s，最高 %s，最低 %s，成交额 %s %s", r, name, q.Price(q.Last), q.Currency, idle, q.Period, ch,
+	line := fmt.Sprintf("- %s%s：最新 %s %s%s，%s %s，最高 %s，最低 %s，成交额 %s %s", r, name, q.Price(q.Last), q.Currency, idle, q.Period, ch,
 		q.Price(q.High), q.Price(q.Low), fmtCompactFloat(q.Turnover), q.Currency)
+	var facts []string
+	for _, f := range q.Facts {
+		facts = append(facts, f.Label+" "+f.Value)
+	}
+	if len(facts) > 0 {
+		line += "；" + strings.Join(facts, "，")
+	}
+	return line
 }
 
 func (p *plugin) toolQuote(ctx context.Context, symbols []string) (string, error) {

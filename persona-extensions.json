@@ -8,7 +8,7 @@
         "manifest_version": 1,
         "id": "claude-bypass-allow",
         "name": "Bypass 自动允许",
-        "version": "0.2.13",
+        "version": "0.2.15",
         "description": "Claude Code 开着 bypassPermissions（--dangerously-skip-permissions）时，有些调用仍会弹确认框（如读工作目录外的文件、开子 Agent、某些 Bash），无人值守的 Agent 就卡在「在等你」。在你选的电脑上给 Claude Code 装一个 PermissionRequest hook：只在会话是 bypass 模式时，自动允许 Bash、只读工具（Read、Glob、Grep、LS、NotebookRead）和子 Agent。删除、覆盖数据的 Bash 命令，目标都在临时目录或工作目录里（/tmp、会话的工作目录、~/ag-work、~/wt、Claude Code 的 worktree 等）时直接放行，其余的仍然问你；打开「删除和覆盖也自动允许」就都放行。force push、改权限的 Bash 命令，写文件、Workflow 和 MCP 工具，以及你自己配的 ask / deny 规则，始终问你。每次自动允许都记一条（命令截断、去掉密钥）。别的模式照常问你。",
         "publisher": "nwverse",
         "homepage": "https://github.com/nwverse/persona-extensions/tree/main/extensions/claude-bypass-allow",
@@ -98,9 +98,9 @@
       ],
       "packages": [
         {
-          "url": "release:claude-bypass-allow-v0.2.13/claude-bypass-allow-0.2.13.tar.gz",
-          "sha256": "f0c7b319286046800ada59ad86ca8cb77fe93d6a90cfd0712b358cf6eb343989",
-          "size": 12167339
+          "url": "release:claude-bypass-allow-v0.2.15/claude-bypass-allow-0.2.15.tar.gz",
+          "sha256": "c18e63c83273672e8a441fe451817b32c24f3040b818c2341cdf9327b4859d57",
+          "size": 12165767
         }
       ]
     },
@@ -109,7 +109,7 @@
         "manifest_version": 1,
         "id": "github",
         "name": "GitHub",
-        "version": "0.4.11",
+        "version": "0.4.13",
         "description": "GitHub 进 Persona：收件箱里是请你 review、@ 你、指派给你、你的 PR / issue 有了新评论或 review、CI 失败；和你有关的 PR、issue 归档进知识库；助手能搜、读 PR / issue、看改动和 CI，评论和 review 先在手机上确认。登录用你某台电脑上的 gh 登录或设备码登录，token 加密存在 hub 的数据库里。侧边栏的「GitHub」页：待你 review 的 PR、你的 PR 和 CI、指派 / 提到你的、通知和关注的动态、你的仓库（浏览代码、分支、README），PR 的改动文件、逐文件 diff 和行内评论、全部评论、CI 日志摘要，在这一页上评论、review、合并（先预览、确认后才发）。",
         "publisher": "nwverse",
         "homepage": "https://github.com/nwverse/persona-extensions/tree/main/extensions/github",
@@ -280,9 +280,113 @@
       ],
       "packages": [
         {
-          "url": "release:github-v0.4.11/github-0.4.11.tar.gz",
-          "sha256": "e39d49c49808c63bf04eaaaad1d1600c4de5230035f6b7f563b31e84189da3d8",
-          "size": 13541208
+          "url": "release:github-v0.4.13/github-0.4.13.tar.gz",
+          "sha256": "1a763663fd9e4f6129a1e8fffaeac9ba35458151c18503fc24ee8d2f075a6918",
+          "size": 13547340
+        }
+      ]
+    },
+    {
+      "manifest": {
+        "manifest_version": 1,
+        "id": "homeassistant",
+        "name": "Home Assistant",
+        "version": "0.1.6",
+        "description": "接你自己的 Home Assistant：主导航上多一个「家」，按区域看设备和传感器的状态、搜索实体，点开开关灯、调亮度、调空调温度和模式、开关窗帘、执行场景，看最近 24 小时的变化；助手能查家里的状态和历史，也能操作设备（每次都在手机上确认，门锁和警戒永远要确认）。用长期访问令牌连 Home Assistant 的 REST API。",
+        "publisher": "nwverse",
+        "engines": {
+          "plugin_protocol": 1
+        },
+        "runtime": {
+          "command": {
+            "linux-amd64": "bin/homeassistant-linux-amd64",
+            "linux-arm64": "bin/homeassistant-linux-arm64",
+            "darwin-arm64": "bin/homeassistant-darwin-arm64",
+            "darwin-amd64": "bin/homeassistant-darwin-amd64"
+          }
+        },
+        "contributes": {
+          "connectors": [
+            {
+              "id": "homeassistant",
+              "name": "Home Assistant",
+              "capabilities": [
+                "status",
+                "tools",
+                "actions"
+              ],
+              "confirm_always": [
+                "homeassistant_secure_call"
+              ]
+            }
+          ],
+          "ui": [
+            {
+              "id": "home",
+              "title": "家",
+              "placement": "nav_page",
+              "icon": "gauge"
+            }
+          ]
+        },
+        "configuration": {
+          "type": "object",
+          "required": [
+            "url"
+          ],
+          "properties": {
+            "url": {
+              "type": "string",
+              "title": "Home Assistant 地址",
+              "description": "hub 这台机器能访问到的地址，如 http://homeassistant.local:8123 或 http://<局域网地址>:8123",
+              "format": "uri"
+            },
+            "insecure_tls": {
+              "type": "boolean",
+              "title": "不校验证书",
+              "description": "地址是 https、用的是自签名证书时打开",
+              "default": false
+            },
+            "writable_domains": {
+              "type": "array",
+              "title": "可操作的类型",
+              "description": "能被操作的实体类型（domain）。不填就是常见的设备：灯、开关、风扇、窗帘、空调、播放器、扫地机、场景、脚本、门锁、警戒等；homeassistant、shell_command 这类整机和命令的永远不在里面，除非你写上",
+              "items": {
+                "type": "string"
+              }
+            },
+            "hidden_areas": {
+              "type": "array",
+              "title": "不显示的区域",
+              "description": "区域的名字或 id：页面和助手都看不到这些区域里的东西",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "secrets": [
+          {
+            "name": "token",
+            "title": "长期访问令牌",
+            "description": "在 Home Assistant 的「个人资料 › 安全 › 长期访问令牌」里新建；用管理员账号建才能按区域显示",
+            "required": true
+          }
+        ],
+        "permissions": {
+          "network": []
+        }
+      },
+      "tags": [
+        "智能家居",
+        "Home Assistant",
+        "设备"
+      ],
+      "packages": [
+        {
+          "url": "release:homeassistant-v0.1.6/homeassistant-0.1.6.tar.gz",
+          "sha256": "d2f763ece941b858f7f853c4ca62c888fe70fa6f46683eee55b6bf147cade4de",
+          "size": 12870920
         }
       ]
     },
@@ -527,8 +631,8 @@
         "manifest_version": 1,
         "id": "markets",
         "name": "行情",
-        "version": "0.3.0",
-        "description": "行情（加密货币来自 OKX 公开行情接口，A 股、港股、美股来自腾讯行情的网页接口，都不用账号）：主导航上多一个「行情」，搜币、搜股票，看自选的价格和涨跌，点开看 K 线走势和成交量；助手能用工具搜代码、查报价和 K 线。hub 去读，手机不用代理。",
+        "version": "0.6.1",
+        "description": "行情（加密货币来自 OKX 公开行情接口，A 股、港股、美股来自腾讯行情的网页接口，都不用账号）：主导航上多一个「行情」，搜币、搜股票，看自选的价格和涨跌，点开看 K 线走势和成交量；可以给代码设价格提醒，到了进收件箱；助手能用工具搜代码、查报价和 K 线。hub 去读，手机不用代理。",
         "publisher": "nwverse",
         "engines": {
           "plugin_protocol": 1
@@ -548,7 +652,9 @@
               "name": "行情",
               "capabilities": [
                 "status",
-                "tools"
+                "tools",
+                "inbox",
+                "fallback"
               ],
               "hosts": [
                 "www.okx.com",
@@ -556,7 +662,13 @@
                 "smartbox.gtimg.cn",
                 "web.ifzq.gtimg.cn",
                 "ifzq.gtimg.cn"
-              ]
+              ],
+              "kinds": [
+                "price_alert"
+              ],
+              "kind_descriptions": {
+                "price_alert": "用户自己在「行情」里设的价格提醒到了（涨到、跌到某个价，或涨跌幅超过设的百分比），需要用户"
+              }
             }
           ],
           "ui": [
@@ -565,12 +677,24 @@
               "title": "行情",
               "placement": "nav_page",
               "icon": "chart"
+            },
+            {
+              "id": "card",
+              "title": "行情",
+              "placement": "overview_card",
+              "opens": "watchlist"
             }
           ]
         },
         "configuration": {
           "type": "object",
           "properties": {
+            "triage_rules": {
+              "type": "string",
+              "title": "分拣规则",
+              "maxLength": 4000,
+              "description": "行情提醒的条目按什么分「需要你 / 知悉即可 / 噪音」，用你自己的话写；填了就只用它、不用收件箱的全局规则（只管行情提醒）。一般不在这里改：和助手说（比如「比特币的提醒知悉即可」），它来改。写 \\n 换行；空着用全局规则"
+            },
             "watchlist": {
               "type": "array",
               "title": "初始自选",
@@ -585,6 +709,10 @@
               "description": "来源没有这个周期时用它最接近 1 小时的",
               "default": "1H",
               "oneOf": [
+                {
+                  "const": "T",
+                  "title": "今日分时（股票）"
+                },
                 {
                   "const": "15m",
                   "title": "15 分钟"
@@ -606,6 +734,12 @@
                   "title": "1 周"
                 }
               ]
+            },
+            "overview_card": {
+              "type": "boolean",
+              "title": "总览卡片",
+              "description": "在总览上放一张行情卡片：BTC、上证指数、恒生指数、纳斯达克，和自选里涨跌最多的几个，点开进「行情」。关掉就不显示",
+              "default": true
             },
             "colors": {
               "type": "string",
@@ -649,9 +783,60 @@
       ],
       "packages": [
         {
-          "url": "release:markets-v0.3.0/markets-0.3.0.tar.gz",
-          "sha256": "efbc39bb6b0ef5ecf6a9bab555e75e46364da66219a32c6d3419df5f4f180a8a",
-          "size": 12827850
+          "url": "release:markets-v0.6.1/markets-0.6.1.tar.gz",
+          "sha256": "7365c19d2efbe6f06bfeed0b4efc30e8df428005dc74cc3170dcb67e7692496f",
+          "size": 13022820
+        }
+      ]
+    },
+    {
+      "manifest": {
+        "manifest_version": 1,
+        "id": "mnemo",
+        "name": "mnemo 历史会话搜索",
+        "version": "0.1.0",
+        "description": "只有声明、不跑程序：跑助手的那台电脑上装了 mnemo（https://github.com/szupzj18/mnemo），Claude 助手就多一组 mcp__mnemo__* 工具，按内容搜 Claude Code、Codex 等 Agent 以前的会话，读命中处的上下文。只开只读工具，重建索引的 reindex 禁用。没装 mnemo 时什么都不加。Persona 不传凭据，也不读 mnemo 的配置。",
+        "publisher": "nwverse",
+        "homepage": "https://github.com/nwverse/persona-extensions/tree/main/extensions/mnemo",
+        "engines": {
+          "persona": ">=202611051918"
+        },
+        "contributes": {
+          "mcp_servers": [
+            {
+              "id": "mnemo",
+              "command": "mnemo",
+              "env": "PERSONA_MNEMO_BIN",
+              "args": [
+                "mcp"
+              ],
+              "requires": [
+                "mcp"
+              ],
+              "allow": [
+                "search_sessions",
+                "get_context",
+                "get_session",
+                "list_recent_sessions"
+              ],
+              "deny": [
+                "reindex"
+              ]
+            }
+          ]
+        }
+      },
+      "tags": [
+        "agents",
+        "assistant",
+        "search",
+        "mcp"
+      ],
+      "packages": [
+        {
+          "url": "release:mnemo-v0.1.0/mnemo-0.1.0.tar.gz",
+          "sha256": "d6555f50a82f84b970e8a84c531be518cdb7b81e70dc9e248fb6f2049e27b016",
+          "size": 840
         }
       ]
     },
@@ -889,7 +1074,7 @@
         "manifest_version": 1,
         "id": "telegram",
         "name": "Telegram",
-        "version": "0.1.18",
+        "version": "0.1.20",
         "description": "用你自己的 Telegram 账号（MTProto，hub 连 Telegram 的数据中心；hub 的环境设了 HTTPS_PROXY 时经它的 HTTP CONNECT 隧道）：App 里的 Telegram 会话，收件箱（私聊、@我），知识库归档，助手的 Telegram 工具和 tg 命令行。发消息、回复、转发、点 reaction、标为已读都先在手机上确认。登录（api_id、api_hash 和会话）加密存在 hub 的数据库里，不在扩展目录。",
         "publisher": "nwverse",
         "engines": {
@@ -978,9 +1163,9 @@
       ],
       "packages": [
         {
-          "url": "release:telegram-v0.1.18/telegram-0.1.18.tar.gz",
-          "sha256": "2789004aec6a00316e4c6c54c3c8d7c3348fa3a55376c2991dcc222d3ad405a6",
-          "size": 22266011
+          "url": "release:telegram-v0.1.20/telegram-0.1.20.tar.gz",
+          "sha256": "b6beb83ffe0a57157c547f8c14998c41caf35f1c7d898114be52ae63ba9d52d8",
+          "size": 22267945
         }
       ]
     },

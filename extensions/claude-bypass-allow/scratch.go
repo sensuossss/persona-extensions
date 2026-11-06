@@ -243,8 +243,8 @@ func readVars(raw string, segs []segment, tail, cwd string, relative bool) *shel
 			sv.off = true
 		}
 		for i, w := range words {
-			if i == firstProgram(words) || (i > 0 && wrappers[path.Base(words[i-1])]) {
-				switch path.Base(w) {
+			if i == firstProgram(words) || (i > 0 && wrappers[progName(words[i-1])]) {
+				switch progName(w) {
 				case "ln", "link", "mount", "bindfs":
 					sv.links = true
 				}
@@ -337,7 +337,7 @@ func allAssignments(words []string) bool {
 // shellish says whether words run a shell, whose own variables the outer ones are not.
 func shellish(words []string) bool {
 	for i, w := range words {
-		b := path.Base(w)
+		b := progName(w)
 		if shells[b] || len(globMatches(b)) > 0 {
 			return true
 		}
@@ -631,7 +631,7 @@ func (g *guard) scratchTargets(before, targets []string) bool {
 		return false
 	}
 	for _, w := range before {
-		b := path.Base(w)
+		b := progName(w)
 		if (wrappers[w] || wrappers[b]) && !scratchWrappers[b] {
 			return false // xargs, find -exec, ssh, eval…: the targets are not what they look like
 		}

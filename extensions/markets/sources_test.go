@@ -98,11 +98,12 @@ func TestSources(t *testing.T) {
 	v := render(t, p, "", 5)
 	got := texts(v)
 	// grouped by source in the sources' order, a name as the title with the symbol under it
-	if v.Sections[0].Title != "加密货币 · 1" || v.Sections[1].Title != "美股 · 1" {
-		t.Errorf("groups %q %q", v.Sections[0].Title, v.Sections[1].Title)
+	// (after the order and market controls)
+	if v.Sections[1].Title != "加密货币 · 1" || v.Sections[2].Title != "美股 · 1" {
+		t.Errorf("groups %q %q", v.Sections[1].Title, v.Sections[2].Title)
 	}
-	for _, want := range []string{"row BTC-USDT 高 51000.00", "row Example Apple AAPL · 高 212 · 低 199 210",
-		"[+5.00% danger] →open:us:AAPL", "OKX、美股 公开行情", "直接写代码，如 BTC-USDT、us:AAPL；不是 OKX 的，代码前写来源"} {
+	for _, want := range []string{"row BTC-USDT +2000.00", "row Example Apple AAPL · +10 · 成交 90.00亿 USD 210",
+		"[+5.00% danger] →open:us:AAPL", "OKX、美股 公开行情", "segmented   all   →mkt"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the page has no %q:\n%s", want, got)
 		}

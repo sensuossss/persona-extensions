@@ -2,6 +2,7 @@ package pluginkit
 
 import (
 	"encoding/json"
+	"math"
 	"time"
 )
 
@@ -196,8 +197,12 @@ type ActionResult struct {
 	OpenURL string `json:"open_url,omitempty"`
 }
 
-// Ratio is a pointer to r, clamped to 0…1 (progress items need one).
+// Ratio is a pointer to r, clamped to 0…1 (progress items need one). NaN, as from 0 used of a 0 limit, is 0: JSON
+// cannot carry it.
 func Ratio(r float64) *float64 {
+	if math.IsNaN(r) {
+		r = 0
+	}
 	r = min(max(r, 0), 1)
 	return &r
 }

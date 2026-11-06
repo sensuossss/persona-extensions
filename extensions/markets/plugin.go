@@ -29,6 +29,10 @@ type Config struct {
 	TZ        string   `json:"tz,omitempty"`
 	// Colors is how a change is coloured: "red_up" (红涨绿跌, the default) or "green_up".
 	Colors string `json:"colors,omitempty"`
+	// OverviewCard: the card on 总览; nil (not set) is on.
+	OverviewCard *bool `json:"overview_card,omitempty"`
+	// TriageRules: the user's own rules for sorting the alerts in the inbox (read with pluginkit.TriageRules).
+	TriageRules string `json:"triage_rules,omitempty"`
 }
 
 // defaultWatchlist is the watchlist when the configuration seeds none: the default source's symbols.
@@ -52,6 +56,9 @@ type plugin struct {
 	wmu       sync.Mutex
 	watchPath string // "" before initialize, or when the hub gave no data directory: kept in memory only
 	watch     []Ref
+
+	alerts alerts
+	rules  string // the user's triage rules for the inbox (triage_rules)
 
 	mu        sync.Mutex
 	lastOK    time.Time
@@ -110,6 +117,8 @@ func (p *plugin) configure(ip pluginkit.InitParams) error {
 		p.loc = l
 	}
 	p.cfg = cfg
+	p.rules = pluginkit.TriageRules(ip.Config)
+	p.alerts.load(ip.Plugin.DataDir)
 
 	seed := cfg.Watchlist
 	if len(seed) == 0 {
@@ -218,6 +227,33 @@ func (p *plugin) moveWatch(r Ref, by int) error {
 				w[i], w[j] = w[j], w[i]
 				break
 			}
+		}
+		return w, "", nil
+	})
+	return err
+}
+
+// moveWatchTop moves r to the top of its source's group.
+func (p *plugin) moveWatchTop(r Ref) error {
+	_, err := p.setWatch(func(w []Ref) ([]Ref, string, error) {
+		if !slices.Contains(w, r) {
+			return w, "", nil
+		}
+		// the group's places stay its own: r takes the first, the group's others before it move down one of them
+		var at []int
+		for i, x := range w {
+			if x.Source == r.Source {
+				at = append(at, i)
+			}
+		}
+		g := []Ref{r}
+		for _, i := range at {
+			if w[i] != r {
+				g = append(g, w[i])
+			}
+		}
+		for k, i := range at {
+			w[i] = g[k]
 		}
 		return w, "", nil
 	})
@@ -376,19 +412,20 @@ func (p *plugin) cStatus(context.Context, *pluginkit.Hub, json.RawMessage) (any,
 
 func (p *plugin) handlers() map[string]pluginkit.Handler {
 	h := map[string]pluginkit.Handler{
-		"connector.status":     p.cStatus,
-		"connector.tools.list": p.cToolsList,
-		"connector.tools.call": p.cToolsCall,
-		"ui.render":            p.uiRender,
-		"ui.action":            p.uiAction,
+		"connector.status":        p.cStatus,
+		"connector.tools.list":    p.cToolsList,
+		"connector.tools.call":    p.cToolsCall,
+		"connector.inbox.collect": p.cInboxCollect,
+		"ui.render":               p.uiRender,
+		"ui.action":               p.uiAction,
 	}
 	for name, fn := range h {
-		want := "markets"
+		want := []string{"markets"}
 		if strings.HasPrefix(name, "ui.") {
-			want = "watchlist"
+			want = []string{"watchlist", "card"} // the manifest's ui contributions
 		}
 		h[name] = func(ctx context.Context, hub *pluginkit.Hub, params json.RawMessage) (any, error) {
-			if c := pluginkit.Contribution(params); c != "" && c != want {
+			if c := pluginkit.Contribution(params); c != "" && !slices.Contains(want, c) {
 				return nil, pluginkit.Errorf(pluginkit.CodeNoContribution, "no contribution %s here", c)
 			}
 			return fn(ctx, hub, params)
