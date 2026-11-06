@@ -183,6 +183,39 @@ func TestPersonOnly(t *testing.T) {
 	}
 }
 
+func TestSSHOptionCommands(t *testing.T) {
+	for _, c := range []struct {
+		command string
+		blocked bool
+	}{
+		{`ssh -o 'RemoteCommand=rm -rf /x' host`, true},
+		{`ssh -o ProxyCommand='rm -rf /x' host`, true},
+		{`ssh -oRemoteCommand='rm -rf /x' host`, true},
+		{`ssh -oProxyCommand='rm -rf /x' host`, true},
+		{`ssh -o 'remotecommand=rm -rf /x' host`, true},
+		{`ssh -o 'PROXYCOMMAND=rm -rf /x' host`, true},
+		{`sudo /usr/bin/ssh -o 'RemoteCommand=rm -rf /x' host`, true},
+		{`autossh -M 0 -o 'ProxyCommand=rm -rf /x' host`, true},
+		{`ssh -o 'ProxyCommand=sh -c "rm -rf /x"' host`, true},
+		{`ssh -o RemoteCommand=rm host`, true},
+		{`ssh -o 'RemoteCommand=rm -rf /tmp/x' host`, true},
+		{`ssh -o ConnectTimeout=5 host`, false},
+		{`ssh -oConnectTimeout=5 host`, false},
+		{`ssh -o 'RemoteCommand=ls -la' host`, false},
+		{`ssh -o 'ProxyCommand=nc %h %p' host`, false},
+		{`ssh -o ProxyCommand=none host`, false},
+		{`echo 'RemoteCommand=rm -rf /x'`, false},
+	} {
+		t.Run(c.command, func(t *testing.T) {
+			// Remote commands must not inherit the local scratch-directory exemption.
+			g := newGuard("/home/me/project", false)
+			if why := g.personOnly(c.command); (why != "") != c.blocked {
+				t.Errorf("personOnly() = %q, want blocked %v", why, c.blocked)
+			}
+		})
+	}
+}
+
 func TestHookOtherTools(t *testing.T) {
 	e := newEnv(t)
 	now := time.Now()

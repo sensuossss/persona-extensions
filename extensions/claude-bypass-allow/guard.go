@@ -186,11 +186,13 @@ func (g *guard) personOnlyDepth(cmd string, depth int) string {
 		if depth >= 3 {
 			continue
 		}
-		shell := false
+		shell, ssh := false, false
 		for i, w := range kept {
 			b := progName(w)
+			ssh = ssh || b == "ssh" || b == "autossh"
 			shell = shell || shells[b] || ((b == "sudo" || b == "doas") && sudoShell(kept[i+1:]))
 			for _, n := range globMatches(b) {
+				ssh = ssh || n == "ssh" || n == "autossh"
 				shell = shell || shells[n]
 			}
 			if b == "env" {
@@ -203,6 +205,17 @@ func (g *guard) personOnlyDepth(cmd string, depth int) string {
 			}
 		}
 		for _, w := range kept {
+			if ssh {
+				// Both -o Key=command and -oKey=command run the value, not the assignment.
+				key, command, ok := strings.Cut(strings.TrimPrefix(w, "-o"), "=")
+				key = strings.TrimSpace(key)
+				if ok && (strings.EqualFold(key, "RemoteCommand") || strings.EqualFold(key, "ProxyCommand")) {
+					if why := g.nested(kept, command, depth+1); why != "" {
+						return why
+					}
+					continue
+				}
+			}
 			sub := strings.Contains(w, "$(") || strings.Contains(w, "`")
 			if sub || (shell && strings.ContainsAny(w, " \t\n;&|()<>")) {
 				target := w
